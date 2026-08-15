@@ -1,0 +1,29 @@
+{
+  "name": "@taiwan-mahjong/rules",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Authoritative Domain: tile identities, shuffle/deal, double-cursor tail, chi/peng/kong/hu and scoring logic",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "drand-client": "^1.4.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  }
+}

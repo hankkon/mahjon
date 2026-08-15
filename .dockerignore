@@ -1,0 +1,20 @@
+# Local tooling / VCS
+.git
+.gitignore
+.DS_Store
+
+# Node
+node_modules
+dist
+coverage
+*.log
+
+# Godot client (not needed to build the server image)
+apps/player-client
+.godot
+
+# Runtime/deploy data (certs, ACME challenge) — mounted via volumes, never baked in
+data
+nginx
+docker-compose.yml
+DEPLOYMENT.md

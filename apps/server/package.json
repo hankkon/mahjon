@@ -1,0 +1,27 @@
+{
+  "name": "@taiwan-mahjong/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Node.js + TypeScript WebSocket (WSS) authoritative real-time server: room lifecycle, Generation ID, command deduplication",
+  "main": "dist/apps/server/src/index.js",
+  "types": "dist/apps/server/src/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "serve": "node dist/apps/server/src/serve.js",
+    "serve:web": "node dist/apps/server/src/serve-web.js",
+    "start": "node dist/apps/server/src/serve.js",
+    "dev": "node --watch dist/apps/server/src/serve.js",
+    "simulate": "node dist/apps/server/src/scripts/simulate-match.js"
+  },
+  "dependencies": {
+    "@taiwan-mahjong/rules": "workspace:*",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/ws": "^8.5.13",
+    "typescript": "^5.7.0"
+  }
+}

@@ -1,0 +1,9 @@
+packages:
+  - "packages/*"
+  - "apps/*"
+
+# Allow build scripts for packages required by vitest/esbuild.
+onlyBuiltDependencies:
+  - esbuild
+allowBuilds:
+  esbuild: true
