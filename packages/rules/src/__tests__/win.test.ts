@@ -486,3 +486,95 @@ describe("detectWin — 過夜補充案例", () => {
     expect(detectWin(hand, open).win).toBe(true);
   });
 });
+
+describe("detectWin — 過夜指定反例", () => {
+  beforeEach(() => resetIds());
+
+  it("[不胡] 手牌 16 張不可胡", () => {
+    const hand = tiles(
+      "wan:1", "wan:2", "wan:3",
+      "wan:4", "wan:5", "wan:6",
+      "wan:7", "wan:8", "wan:9",
+      "tong:1", "tong:2", "tong:3",
+      "tong:4", "tong:5", "tong:6",
+      "tong:7",
+    );
+    expect(hand).toHaveLength(16);
+    // total(16) != 17 + 0 槓 → 直接不胡。
+    expect(detectWin(hand, []).win).toBe(false);
+  });
+
+  it("[不胡] 只有對子沒有面子不可胡", () => {
+    const hand = tiles(
+      "wan:1", "wan:1",
+      "wan:2", "wan:2",
+      "wan:3", "wan:3",
+      "wan:4", "wan:4",
+      "wan:5", "wan:5",
+      "wan:6", "wan:6",
+      "wan:7", "wan:7",
+      "wan:8", "wan:9", "tong:1",
+    );
+    expect(hand).toHaveLength(17);
+    // 7 對 + 3 孤張：標準胡 17 張但任一對取下後剩孤張不成面子。
+    expect(detectWin(hand, []).win).toBe(false);
+  });
+
+  it("[不胡] 字牌東南北當順不可胡", () => {
+    const hand = tiles(
+      "wan:1", "wan:2", "wan:3",
+      "wan:4", "wan:5", "wan:6",
+      "wan:7", "wan:8", "wan:9",
+      "tong:1", "tong:2", "tong:3",
+      "tong:9", "tong:9",
+      "honor:dong", "honor:nan", "honor:xi",
+    );
+    expect(hand).toHaveLength(17);
+    // honor 東/南/西各 1 張只能成刻（count 3），不成順 → 無法成面子。
+    expect(detectWin(hand, []).win).toBe(false);
+  });
+
+  it("[不胡] 1萬2筒3條跨花色當順不可胡", () => {
+    const hand = tiles(
+      "wan:4", "wan:5", "wan:6",
+      "wan:7", "wan:8", "wan:9",
+      "tong:1", "tong:2", "tong:3",
+      "tiao:4", "tiao:5", "tiao:6",
+      "wan:1", "tong:2", "tiao:3",
+      "tiao:7", "tiao:7",
+    );
+    expect(hand).toHaveLength(17);
+    // wan1/tong2/tiao3 各屬不同 suit，map 內無法形成連續順。
+    expect(detectWin(hand, []).win).toBe(false);
+  });
+
+  it("[不胡] 八個對子 16 張無刻不可當八對子", () => {
+    const hand = tiles(
+      "wan:1", "wan:1",
+      "wan:2", "wan:2",
+      "wan:3", "wan:3",
+      "wan:4", "wan:4",
+      "wan:5", "wan:5",
+      "wan:6", "wan:6",
+      "wan:7", "wan:7",
+      "tong:9", "tong:9",
+    );
+    expect(hand).toHaveLength(16);
+    // 八對子需 7 對 + 1 刻 = 17 張；16 張無刻不可。
+    expect(detectWin(hand, []).win).toBe(false);
+  });
+
+  it("[不胡] 花牌進手不可胡", () => {
+    const hand = tiles(
+      "wan:1", "wan:2", "wan:3",
+      "wan:4", "wan:5", "wan:6",
+      "wan:7", "wan:8", "wan:9",
+      "tong:1", "tong:2", "tong:3",
+      "tong:7", "tong:7",
+      "flower:mei", "flower:lan", "flower:zhu",
+    );
+    expect(hand).toHaveLength(17);
+    // 花 3 張不構成面子；14 有效牌 = 4 面子 + 將，缺 1 面子 → 不胡。
+    expect(detectWin(hand, []).win).toBe(false);
+  });
+});
