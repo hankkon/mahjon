@@ -133,6 +133,8 @@ const room = {
   },
   /** Cumulative scores (verify ledger deltas apply). */
   scores: [0, 0, 0, 0],
+  /** 是否已驗證過發牌張數（閒 16 / 莊 17）— 只做首張 playing 快照一次。 */
+  dealtChecked: false,
   /** All ended rounds, for rotation invariant. */
   rounds: [] as Array<{ winner: number | null; dealer: number; streak: number }>,
   /** Hands won by an actual player (not 流局). */
@@ -315,6 +317,18 @@ function handleEvent(bot: Bot, evt: Record<string, unknown>): void {
             if (mine.melds.length > bot.maxMeldsSeen) bot.maxMeldsSeen = mine.melds.length;
           }
           if (mine.hand) bot.lastHandSize = mine.hand.length;
+          // 台灣 16 張制：發牌後閒家 16、莊家 17（花牌在 flowers 不佔手牌）。
+          // 只做第一次 playing 快照的一次性檢查，避免每局重複計數。
+          if (!room.dealtChecked && bot.name === "A" && mine.hand) {
+            room.dealtChecked = true;
+            const expected = bot.seat === room.dealer ? 17 : 16;
+            check(
+              "A",
+              "發牌張數 閒16/莊17",
+              mine.hand.length === expected,
+              `seat=${bot.seat} dealer=${room.dealer} hand=${mine.hand.length} (期望 ${expected})`,
+            );
+          }
         }
       }
       break;
