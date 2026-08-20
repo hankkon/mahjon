@@ -119,6 +119,16 @@ var _win_btn_tween: Tween
 @onready var fx_layer: Control = %FXLayer
 @onready var river_view: Node = $RiverView
 @onready var settlement_view: Node = $SettlementView
+@onready var center_compass: PanelContainer = %CenterCompass
+@onready var compass_wind: Label = %CompassWind
+@onready var compass_timer: Label = %CompassTimer
+@onready var compass_wall: Label = %CompassWall
+@onready var dir_top: Label = %DirTop
+@onready var dir_bottom: Label = %DirBottom
+@onready var dir_left: Label = %DirLeft
+@onready var dir_right: Label = %DirRight
+@onready var turn_banner: Label = %TurnBanner
+var _last_turn := -1
 var hand_view: RefCounted
 var seat_panels_view: RefCounted
 
@@ -176,12 +186,14 @@ func _ready() -> void:
 	_refresh()
 
 
-## 每幀更新倒數計時與莊家資訊（依快照 phaseDeadline 本地倒數）。
+## 每幀更新倒數計時、莊家資訊、中央羅盤與出牌提示（依快照 phaseDeadline 本地倒數）。
 func _process(_delta: float) -> void:
 	if not is_inside_tree():
 		return
 	_update_countdown()
 	_update_dealer_info()
+	_update_compass()
+	_update_turn_banner()
 
 
 func _exit_tree() -> void:
@@ -317,13 +329,20 @@ func _on_queue_drained() -> void:
 		_refresh()
 
 
-## 把最新快照「一次刷上畫面」：四家面板、棄牌池、手牌、反應列。
+## 把最新快照「一次刷上畫面」：四家面板、棄牌池、手牌、反應列、中央羅盤、出牌提示。
 func _render_final_state() -> void:
+	if GameState.status == "playing":
+		if GameState.turn != _last_turn:
+			_last_turn = GameState.turn
+			if GameState.turn == GameState.you and GameState.game_phase == "discard":
+				AudioManager.play_turn_start()
 	_render_side_panels()
 	_render_discard_pool()
 	_update_last_discard_marker()
 	_render_hand()
 	_render_reaction_bar()
+	_update_compass()
+	_update_turn_banner()
 	_last_discard_size = GameState.discards.size()
 	_last_melds = _meld_signatures()
 	_hand_rendered_once = true
@@ -622,6 +641,88 @@ func _update_dealer_info() -> void:
 	dealer_info_label.text = "%s風 莊家 %s%s" % [
 		_wind_name(GameState.dealer), GameState.seat_name(GameState.dealer), streak_txt,
 	]
+
+
+# ---------------------------------------------------------------------------
+# 中央羅盤風向盤（東南西北輪轉燈 + 圈風局數 + 倒數秒數 + 餘牌）
+# ---------------------------------------------------------------------------
+
+func _update_compass() -> void:
+	if center_compass == null:
+		return
+	if GameState.status != "playing":
+		center_compass.visible = false
+		return
+	center_compass.visible = true
+
+	# 圈風局數資訊
+	var dealer_wind: String = _wind_name(GameState.dealer)
+	var streak: int = GameState.dealer_streak
+	var streak_txt: String = " 第 %d 局" % (streak + 1) if streak > 0 else " 第 1 局"
+	if compass_wind:
+		compass_wind.text = "%s風%s" % [dealer_wind if dealer_wind != "" else "東", streak_txt]
+
+	# 剩餘牌數
+	if compass_wall:
+		compass_wall.text = "餘 %d 張" % GameState.wall_head_remaining
+
+	# 倒數秒數
+	var remain_ms: int = GameState.remaining_ms()
+	var sec: int = int(ceil(remain_ms / 1000.0)) if remain_ms >= 0 else 0
+	if compass_timer:
+		if remain_ms >= 0:
+			compass_timer.text = "%d" % sec
+			compass_timer.modulate = Color(1.0, 0.25, 0.25, 1.0) if sec <= 5 else Color(1.0, 0.85, 0.2, 1.0)
+		else:
+			compass_timer.text = "—"
+			compass_timer.modulate = Color(0.7, 0.7, 0.7, 1.0)
+
+	# 四向輪轉指示燈（以「座次→側邊」為準）
+	# bottom (我), top (北/對家), left (西/上家), right (東/下家)
+	var turn_seat: int = GameState.turn
+	var turn_side: String = _seat_side(turn_seat)
+	_style_compass_dir(dir_bottom, "▼ 南 (我)", turn_side == "bottom", turn_seat == GameState.you)
+	_style_compass_dir(dir_top, "▲ 北", turn_side == "top", false)
+	_style_compass_dir(dir_left, "◀西", turn_side == "left", false)
+	_style_compass_dir(dir_right, "東▶", turn_side == "right", false)
+
+
+func _style_compass_dir(label: Label, base_text: String, is_active: bool, is_you: bool) -> void:
+	if label == null:
+		return
+	if is_active:
+		label.text = "▼ 輪到你" if is_you else base_text
+		label.modulate = Color(1.0, 0.9, 0.2, 1.0)
+	else:
+		label.text = base_text
+		label.modulate = Color(0.55, 0.5, 0.42, 0.6)
+
+
+# ---------------------------------------------------------------------------
+# 台灣麻將出牌指示條（TurnBanner）
+# ---------------------------------------------------------------------------
+
+func _update_turn_banner() -> void:
+	if turn_banner == null:
+		return
+	if GameState.status != "playing":
+		turn_banner.visible = false
+		return
+
+	if GameState.is_my_discard_turn():
+		turn_banner.visible = true
+		turn_banner.text = "👉【輪到您出牌】請點選手牌打出"
+		turn_banner.modulate = Color(1.0, 0.88, 0.35, 1.0)
+	elif GameState.in_reaction_window():
+		turn_banner.visible = true
+		turn_banner.text = "⚡【請選擇】吃 / 碰 / 槓 / 過"
+		turn_banner.modulate = Color(0.3, 0.85, 1.0, 1.0)
+	else:
+		turn_banner.visible = true
+		var active_name: String = GameState.seat_name(GameState.turn)
+		turn_banner.text = "等待【%s】出牌中…" % active_name
+		turn_banner.modulate = Color(0.75, 0.75, 0.75, 0.85)
+
 
 
 # ---------------------------------------------------------------------------

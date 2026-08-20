@@ -27,6 +27,8 @@ const SFX_FILES := {
 	"kong": "res://audio/kong.wav",
 	"win": "res://audio/win.wav",
 	"settle": "res://audio/settle.wav",
+	"turn": "res://audio/turn_start.wav",
+	"alert": "res://audio/countdown_alert.wav",
 }
 
 const SETTINGS_PATH := "user://audio_settings.json"
@@ -198,6 +200,10 @@ func _generate_stream(name: String) -> AudioStreamWAV:
 			data = _synthesize_chord(22050, 0.4, [523.0, 659.0, 784.0, 1046.0], 0.5)
 		"settle":
 			data = _synthesize_chord(22050, 0.3, [392.0, 523.0, 659.0], 0.4)
+		"turn":
+			data = _synthesize_chord(22050, 0.28, [587.33, 880.0, 1174.66], 0.45)
+		"alert":
+			data = _synthesize(22050, 0.08, 988.0, 988.0, 0.3, 0.002)
 		_:
 			data = _synthesize(22050, 0.1, 500.0, 300.0, 0.3, 0.002)
 
@@ -322,3 +328,14 @@ func play_win() -> void:
 
 func play_settle() -> void:
 	play_sfx("settle")
+
+
+## 輪到我方出牌提示音（清脆和弦音）。
+func play_turn_start() -> void:
+	play_sfx("turn")
+
+
+## 倒數最後 5 秒緊急警示音。
+func play_alert() -> void:
+	play_sfx("alert")
+

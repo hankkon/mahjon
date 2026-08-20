@@ -34,12 +34,24 @@ func render_side_panels(seat_to_panel: Dictionary, opponent_backs: Dictionary, g
 		var who: String = "（我）" if seat == game_state.you else ""
 		var tag: String = player_tag(seat, p, game_state)
 		var wind_name: String = table_ref.call("_wind_name", seat)
+		var is_turn: bool = game_state.is_playing() and seat == game_state.turn
+		var turn_indicator := ""
+		if is_turn:
+			turn_indicator = " 👈 輪到你" if seat == game_state.you else " 👉 出牌中"
 		var title := Label.new()
-		title.text = "%s %s (%d 張)%s%s" % [
-			game_state.seat_name(seat), wind_name, p.get("handCount", 0), who, tag,
+		title.text = "%s %s (%d 張)%s%s%s" % [
+			game_state.seat_name(seat), wind_name, p.get("handCount", 0), who, tag, turn_indicator,
 		]
-		var style: StyleBoxFlat = table_ref.call("_make_style", GLASS_BG, GOLD_BORDER, 6)
-		table_ref.call("_style_label", title, style, GOLD_TEXT, 15)
+		var bg_color := Color("#2A200BEE") if is_turn else GLASS_BG
+		var border_color := Color("#FFD700FF") if is_turn else GOLD_BORDER
+		var font_color := Color("#FFF080") if is_turn else GOLD_TEXT
+		var style: StyleBoxFlat = table_ref.call("_make_style", bg_color, border_color, 6)
+		if is_turn:
+			style.border_width_left = 2
+			style.border_width_right = 2
+			style.border_width_top = 2
+			style.border_width_bottom = 2
+		table_ref.call("_style_label", title, style, font_color, 15)
 		box.add_child(title)
 		box.move_child(title, 0)
 		render_melds(seat, panel_name, p)
