@@ -58,6 +58,40 @@
 
 ---
 
+## 輪次 4：南部麻將（136 張無花牌）伺服器端變體驗證套件
+
+- **問題**：
+  伺服器與規則引擎雖具備 `VARIANT=south`，但先前單元測試未在 `room.test.ts` 建立專屬變體驗證測試（136 總牌數、發牌 16/17、零花牌與 16 尾牌不變式）。
+- **修改檔案**：
+  - `apps/server/src/__tests__/room.test.ts`
+- **修改內容**：
+  - 新增 `Southern Mahjong (variant: south)` 測試，完整鎖定 136 牌初始發牌 65 張、剩餘牆牌 55 張、尾牌 16 張與零花牌判定。
+- **驗證結果**：
+  - `pnpm test`：164/164 PASS
+  - `pnpm typecheck`：Done
+  - Godot Headless：58/58 PASS
+- **未解風險**：無。
+
+---
+
+## 輪次 5：`AnimationQueue` 清空狀態重置與 Tween 實例有效性防禦
+
+- **問題**：
+  在場景切換或呼叫 `AnimationQueue.clear()` 時，未將 `_playing` 旗標重置為 `false`；若動畫 Tween 被銷毀而未發出 `finished`，可能導致 `is_playing()` 殘留為 `true` 並永久鎖定手牌輸入。且 `_advance` 缺乏 `is_instance_valid(tween)` 守衛。
+- **修改檔案**：
+  - `apps/player-client/scripts/AnimationQueue.gd`
+- **修改內容**：
+  - `clear()` 內加入 `_playing = false` 重置。
+  - `_advance()` 增加 `tween is Tween and is_instance_valid(tween) and tween.is_valid()` 多重型別與有效性守衛。
+- **驗證結果**：
+  - `pnpm test`：164/164 PASS
+  - `pnpm typecheck`：Done
+  - Godot Headless：58/58 PASS
+- **未解風險**：無。
+
+---
+
 ## 總結
 
-3 輪低風險改善皆完成並驗證通過。所有單元測試（163 項）與 Godot headless 渲染測試（58 項）保持 100% 綠燈，未改動任何後端權威邏輯、通訊協議或計分規則。
+各輪低風險改善皆完成並驗證通過。所有單元測試（164 項）與 Godot headless 渲染測試（58 項）保持 100% 綠燈，未改動任何後端權威邏輯、通訊協議或計分規則。
+

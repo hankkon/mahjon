@@ -31,9 +31,10 @@ func enqueue(job: Callable) -> void:
 		_advance()
 
 
-## 清除尚未播放的 job（進行中的動畫不受影響）。
+## 清除尚未播放的 job 並重置播放狀態。
 func clear() -> void:
 	_pending.clear()
+	_playing = false
 
 
 func _advance(_arg: Variant = null) -> void:
@@ -44,9 +45,9 @@ func _advance(_arg: Variant = null) -> void:
 		return
 	_playing = true
 	var job: Callable = _pending.pop_front()
-	var tween: Tween = job.call()
-	if tween == null:
-		# 同步完成的 job：延到下一個影格再推進，避免深層遞迴。
+	var tween: Variant = job.call()
+	if tween == null or not (tween is Tween) or not is_instance_valid(tween) or not tween.is_valid():
+		# 同步完成或無效的 job：延到下一個影格再推進，避免深層遞迴。
 		_advance.call_deferred()
 		return
 	tween.finished.connect(_advance, CONNECT_ONE_SHOT)
