@@ -91,7 +91,24 @@
 
 ---
 
+## 輪次 6：`main.gd` 輸入框 Enter 鍵快捷提交支援
+
+- **問題**：
+  在登入與開房大廳畫面中，輸入玩家名稱或房間代碼後按鍵盤 Enter（`text_submitted`）未自動觸發保存或加入操作，玩家必須手動用滑鼠點選「加入」按鈕。
+- **修改檔案**：
+  - `apps/player-client/scripts/main.gd`
+- **修改內容**：
+  - 在 `_ready()` 中綁定 `room_edit.text_submitted` 觸發 `_on_join_pressed()`，以及 `name_edit.text_submitted` 觸發 `_apply_prefs()`。
+- **驗證結果**：
+  - `pnpm test`：164/164 PASS
+  - `pnpm typecheck`：Done
+  - Godot Headless：58/58 PASS
+- **未解風險**：無。
+
+---
+
 ## 總結
 
 各輪低風險改善皆完成並驗證通過。所有單元測試（164 項）與 Godot headless 渲染測試（58 項）保持 100% 綠燈，未改動任何後端權威邏輯、通訊協議或計分規則。
+
 

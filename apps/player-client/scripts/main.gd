@@ -10,6 +10,10 @@ extends Control
 func _ready() -> void:
 	%CreateBtn.pressed.connect(_on_create_pressed)
 	%JoinBtn.pressed.connect(_on_join_pressed)
+	if name_edit:
+		name_edit.text_submitted.connect(func(_text: String): _apply_prefs())
+	if room_edit:
+		room_edit.text_submitted.connect(func(_text: String): _on_join_pressed())
 
 	# 讀取上次使用的名稱（本地儲存）。
 	if FileAccess.file_exists("user://player_name.cfg"):
