@@ -486,18 +486,46 @@ func _job_discard_fly_out(tile_id: String) -> Callable:
 		return _fly_discard(tile_id, from_center, to_center, slot_size, target)
 
 
-## 吃碰槓：被吃的牌面組合飛到該座位副露區。
+## 吃碰槓：被吃的牌面組合飛到該座位副露區，並跳出「吃！/碰！/槓！」動態標籤。
 func _job_meld_fly(seat: int, meld: Dictionary) -> Callable:
 	var tid: String = str(meld.get("claimed", ""))
 	if tid == "":
 		var tiles: Array = meld.get("tiles", [])
 		tid = str(tiles[0]) if not tiles.is_empty() else ""
 	var kind: String = str(meld.get("kind", ""))
+	var callout := "吃！" if kind == "chi" else ("碰！" if kind == "peng" else "槓！")
 	return func() -> Tween:
+		_play_seat_callout(seat, callout)
 		if tid == "":
 			return null  # 沒有可動畫的牌面 → 同步完成。
 		AudioManager.play_meld(kind)
 		return _fly_tile(tid, _discard_pool_pos(), _meld_area_pos(seat), Vector2(40, 53))
+
+
+## 座位上方彈出動作標籤（吃！/ 碰！/ 槓！）。
+func _play_seat_callout(seat: int, text: String) -> void:
+	if not is_inside_tree() or fx_layer == null:
+		return
+	var pos: Vector2 = _seat_center(seat)
+	var lbl := Label.new()
+	lbl.text = text
+	lbl.add_theme_font_size_override("font_size", 28)
+	lbl.add_theme_color_override("font_color", GOLD_TEXT)
+	lbl.add_theme_color_override("font_outline_color", Color(0.2, 0.1, 0.0, 1.0))
+	lbl.add_theme_constant_override("outline_size", 6)
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl.size = Vector2(160, 40)
+	lbl.pivot_offset = Vector2(80, 20)
+	lbl.global_position = pos - Vector2(80, 20)
+	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	lbl.z_index = 150
+	fx_layer.add_child(lbl)
+	var tw := create_tween()
+	tw.tween_property(lbl, "scale", Vector2(1.3, 1.3), 0.22).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.parallel().tween_property(lbl, "global_position:y", lbl.global_position.y - 24.0, 0.45)
+	tw.parallel().tween_property(lbl, "modulate:a", 0.0, 0.3).set_delay(0.25)
+	tw.tween_callback(lbl.queue_free)
+
 
 
 ## 建立一個從 from 飛到 to 的牌面貼圖動畫（播完自動釋放）。
