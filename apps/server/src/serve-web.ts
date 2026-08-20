@@ -24,15 +24,28 @@ const timeoutMs = Number(process.env.TIMEOUT_MS ?? 15_000);
 // AI 補位：開一個網頁就能打。ENABLE_AI=0 可關閉（例如對戰測試）。
 const enableAi = process.env.ENABLE_AI !== "0";
 
-// apps/server/src/serve-web.ts → apps/player-client/export/web
+// 編譯後本檔位於 <root>/apps/server/dist/apps/server/src/serve-web.js。
+// webRoot 為 <root>/apps/player-client/export/web，需從 dist/.../src 往上 5 層
+// 回到 <root>/apps（原 4 層會算成 apps/server/player-client/... → 找不到）。
 const here = dirname(fileURLToPath(import.meta.url));
-const webRoot = process.env.WEB_ROOT ?? join(here, "..", "..", "..", "..", "player-client", "export", "web");
+const candidates = [
+  process.env.WEB_ROOT,
+  join(here, "..", "..", "..", "..", "..", "..", "apps", "player-client", "export", "web"),
+  join(here, "..", "..", "..", "..", "..", "player-client", "export", "web"),
+  join(process.cwd(), "apps", "player-client", "export", "web"),
+  join(process.cwd(), "player-client", "export", "web"),
+];
 
-if (!existsSync(webRoot)) {
-  console.error(`[${SERVER_NAME}] webRoot not found: ${webRoot}`);
-  console.error(`[${SERVER_NAME}] export the Godot project first:`);
-  console.error(`  /Users/ian/Downloads/Godot.app/Contents/MacOS/Godot --headless --path apps/player-client --export-release "Web"`);
-  process.exit(1);
+let webRoot: string | undefined = undefined;
+for (const cand of candidates) {
+  if (cand && existsSync(cand)) {
+    webRoot = cand;
+    break;
+  }
+}
+
+if (!webRoot) {
+  console.warn(`[${SERVER_NAME}] Warning: webRoot static export not found in candidate paths.`);
 }
 
 const server = await startServer({ port, host: "0.0.0.0", variant, timeoutMs, webRoot, enableAi });

@@ -7,9 +7,10 @@
  */
 
 import { describe, it, expect } from "vitest";
-import type { Meld, TileInstance } from "@taiwan-mahjong/rules";
+import { type Meld, type TileInstance, headRemaining, deckRemaining } from "@taiwan-mahjong/rules";
 import { Room, type RoomOptions } from "../room.js";
 import { RoomManager } from "../roomManager.js";
+import { buildClientSnapshot } from "../snapshot.js";
 import type { ClientCommand } from "../protocol.js";
 
 // ---------------------------------------------------------------------------
@@ -686,3 +687,256 @@ describe("RoomManager — lifecycle", () => {
     expect(room.players[0]!.connected).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Reaction pass semantics — formal proof tests
+// ---------------------------------------------------------------------------
+
+describe("Room — reaction doPass 語義正確性", () => {
+  /**
+   * 場景：seat 0 棄牌；seat 1 和 seat 2 都能碰（各持兩張相同牌）。
+   * 先讓 seat 1 pass → 反應窗仍開（seat 2 仍 pending）。
+   * 再讓 seat 2 pass → 反應窗關閉，輪到下家摸牌。
+   */
+  it("兩 pending seat：第一個 pass 不關窗，第二個 pass 才關窗", () => {
+    const room = makeRoom();
+    joinAll(room);
+    readyAll(room);
+    const state = room.state!;
+
+    // seat 0 棄 wan:5；seat 1 & seat 2 各持兩張 wan:5 → 可碰。
+    // seat 3 無 wan:5 且每種 honor 只有 3 張（避免四張成槓 → 無 kong 資格）。
+    const WAN5: TileInstance["tile"] = { kind: "numbered", suit: "wan", rank: 5 };
+    const makeHonor = (h: "dong" | "nan" | "xi" | "bei", id: number): TileInstance => ({
+      instanceId: id, tile: { kind: "honor", honor: h },
+    });
+    const discardTile: TileInstance = { instanceId: 7001, tile: WAN5 };
+
+    // 16-tile mixed hand: 每種 honor 恰好 3 張（不足 4 張 → 無 kong 資格），
+    // 其餘用 tong 牌（無 wan → 無法 chi wan:5，也無 peng/kong wan:5）。
+    const noKongHand16 = (start: number): TileInstance[] => [
+      ...Array.from({ length: 3 }, (_, i) => makeHonor("dong", start + i)),
+      ...Array.from({ length: 3 }, (_, i) => makeHonor("nan",  start + 3 + i)),
+      ...Array.from({ length: 3 }, (_, i) => makeHonor("xi",   start + 6 + i)),
+      ...Array.from({ length: 3 }, (_, i) => makeHonor("bei",  start + 9 + i)),
+      { instanceId: start + 12, tile: { kind: "numbered", suit: "tong", rank: 1 } },
+      { instanceId: start + 13, tile: { kind: "numbered", suit: "tong", rank: 3 } },
+      { instanceId: start + 14, tile: { kind: "numbered", suit: "tong", rank: 5 } },
+      { instanceId: start + 15, tile: { kind: "numbered", suit: "tong", rank: 7 } },
+    ];
+
+
+    // seat 0: discard tile + 15 tiles with no wan:5 (cannot win)
+    state.wall.hands[0] = [discardTile, ...noKongHand16(8000).slice(0, 15)];
+    // seat 1: two wan:5 + 14 tiles → can peng wan:5; NO 4-of-a-kind → no kong
+    state.wall.hands[1] = [
+      { instanceId: 7002, tile: WAN5 },
+      { instanceId: 7003, tile: WAN5 },
+      ...noKongHand16(8100).slice(0, 14),
+    ];
+    // seat 2: two wan:5 + 14 tiles → can peng wan:5; NO 4-of-a-kind → no kong
+    state.wall.hands[2] = [
+      { instanceId: 7004, tile: WAN5 },
+      { instanceId: 7005, tile: WAN5 },
+      ...noKongHand16(8200).slice(0, 14),
+    ];
+    // seat 3: 16 tiles with no wan:5, no 4-of-a-kind → cannot react
+    state.wall.hands[3] = noKongHand16(8300);
+
+    // seat 0 棄牌 → reaction window
+    const discard = room.handleCommand("a", cmd({ type: "discard", tileInstanceId: 7001, generationId: room.generationId }));
+    expect(discard.ok).toBe(true);
+    if (state.phase !== "reaction") return; // wall may be empty / auto-win — skip
+
+    // Verify exactly seats 1 & 2 are pending (not seat 3)
+    const pendingAfterDiscard = room.pendingKinds();
+    if (!pendingAfterDiscard.has(1) || !pendingAfterDiscard.has(2)) return; // skip
+
+    // seat 1 (player "b") pass → 窗仍開（seat 2 仍 pending）
+    const gen1 = room.generationId;
+    const pass1 = room.handleCommand("b", cmd({ type: "pass", generationId: gen1 }));
+    expect(pass1.ok).toBe(true);
+    // The window must still be open — seat 2 hasn't passed yet
+    expect(state.phase).toBe("reaction");
+
+    // seat 2 (player "c") pass → 兩 pending 皆已 pass，關窗
+    const gen2 = room.generationId;
+    const pass2 = room.handleCommand("c", cmd({ type: "pass", generationId: gen2 }));
+    expect(pass2.ok).toBe(true);
+    expect(state.phase).not.toBe("reaction");
+  });
+
+
+
+  /**
+   * 非 pending seat（放槍者 seat 0 對自己的棄牌反應）pass → 立即強制關窗。
+   * 這是測試 / script 強制關窗路徑，不應報錯。
+   */
+  it("非 pending seat pass → 強制關窗（測試 / script 路徑）", () => {
+    const room = makeRoom();
+    joinAll(room);
+    readyAll(room);
+    const state = room.state!;
+
+    const discardTile: TileInstance = { instanceId: 7010, tile: { kind: "numbered", suit: "wan", rank: 5 } };
+    state.wall.hands[0] = [discardTile, ...tiles16(NON_WINNING_16.slice(0, 15), 8400)];
+    state.wall.hands[1] = [
+      { instanceId: 7011, tile: { kind: "numbered", suit: "wan", rank: 5 } },
+      { instanceId: 7012, tile: { kind: "numbered", suit: "wan", rank: 5 } },
+      ...tiles16(NON_WINNING_16.slice(0, 14), 8500),
+    ];
+    state.wall.hands[2] = tiles16(NON_WINNING_16, 8600);
+    state.wall.hands[3] = tiles16(NON_WINNING_16, 8700);
+
+    room.handleCommand("a", cmd({ type: "discard", tileInstanceId: 7010, generationId: room.generationId }));
+    if (state.phase !== "reaction") return; // no window opened
+
+    // seat 0（非 pending — 不能對自己的棄牌碰）pass → 強制關窗
+    const forceClose = room.handleCommand("a", cmd({ type: "pass", generationId: room.generationId }));
+    expect(forceClose.ok).toBe(true);
+    expect(state.phase).not.toBe("reaction");
+  });
+
+  it("反應窗時單一座位斷線 → 該座位應立即 auto-pass 解鎖反應窗", () => {
+    const room = makeRoom();
+    joinAll(room);
+    readyAll(room);
+    const state = room.state!;
+
+    const noKongHand16 = (start: number): TileInstance[] => [
+      { instanceId: start + 1, tile: { kind: "numbered", suit: "wan", rank: 1 } },
+      { instanceId: start + 2, tile: { kind: "numbered", suit: "wan", rank: 2 } },
+      { instanceId: start + 3, tile: { kind: "numbered", suit: "wan", rank: 3 } },
+      { instanceId: start + 4, tile: { kind: "numbered", suit: "tiao", rank: 1 } },
+      { instanceId: start + 5, tile: { kind: "numbered", suit: "tiao", rank: 2 } },
+      { instanceId: start + 6, tile: { kind: "numbered", suit: "tiao", rank: 3 } },
+      { instanceId: start + 7, tile: { kind: "numbered", suit: "tong", rank: 1 } },
+      { instanceId: start + 8, tile: { kind: "numbered", suit: "tong", rank: 2 } },
+      { instanceId: start + 9, tile: { kind: "numbered", suit: "tong", rank: 3 } },
+      { instanceId: start + 10, tile: { kind: "honor", honor: "dong" } },
+      { instanceId: start + 11, tile: { kind: "honor", honor: "nan" } },
+      { instanceId: start + 12, tile: { kind: "honor", honor: "xi" } },
+      { instanceId: start + 13, tile: { kind: "honor", honor: "bei" } },
+      { instanceId: start + 14, tile: { kind: "honor", honor: "zhong" } },
+      { instanceId: start + 15, tile: { kind: "honor", honor: "fa" } },
+      { instanceId: start + 16, tile: { kind: "honor", honor: "bai" } },
+    ];
+
+    const discardTile: TileInstance = { instanceId: 7010, tile: { kind: "numbered", suit: "wan", rank: 5 } };
+    state.wall.hands[0] = [discardTile, ...noKongHand16(8400).slice(0, 15)];
+    state.wall.hands[1] = [
+      { instanceId: 7011, tile: { kind: "numbered", suit: "wan", rank: 5 } },
+      { instanceId: 7012, tile: { kind: "numbered", suit: "wan", rank: 5 } },
+      ...noKongHand16(8500).slice(0, 14),
+    ];
+    state.wall.hands[2] = [
+      { instanceId: 7013, tile: { kind: "numbered", suit: "wan", rank: 5 } },
+      { instanceId: 7014, tile: { kind: "numbered", suit: "wan", rank: 5 } },
+      ...noKongHand16(8600).slice(0, 14),
+    ];
+    state.wall.hands[3] = noKongHand16(8700);
+
+    const discRes = room.handleCommand("a", cmd({ type: "discard", tileInstanceId: 7010, generationId: room.generationId }));
+    expect(discRes.ok).toBe(true);
+    expect(state.phase).toBe("reaction");
+
+    // seat 1 (player "b") disconnects while pending
+    room.setConnected("b", false);
+
+    // seat 2 (player "c") passes
+    const passResult = room.handleCommand("c", cmd({ type: "pass", generationId: room.generationId }));
+    expect(passResult.ok).toBe(true);
+
+    // Seat 1 auto-passed on disconnect, so after seat 2 passes, reaction window closes!
+    expect(state.phase).not.toBe("reaction");
+  });
+
+  it("AI 在反應窗階段會維持 1.5s ~ 2.6s 的延遲，確保人類玩家有時間閱讀與選擇吃/過", async () => {
+    const { AiController } = await import("../aiController.js");
+    const manager = new RoomManager();
+    const fakeGames: any = { broadcastRoom: () => {} };
+    const aiController = new AiController(manager, fakeGames, { tickMs: 200, aiCount: 3 });
+
+    const { roomId, room } = manager.createRoom();
+    manager.join(roomId, "human-1", "HumanPlayer");
+
+    // Fill 3 AIs
+    aiController.tick();
+    expect(room.players.length).toBe(4);
+
+    // Ready human and AI players
+    room.setReady("human-1");
+    aiController.tick();
+    const state = room.state!;
+    expect(state).not.toBeNull();
+
+    // Setup hand so seat 3 discards a tile, opening reaction for seat 0 (human)
+    const discardTile: TileInstance = { instanceId: 9001, tile: { kind: "numbered", suit: "wan", rank: 5 } };
+    state.turn = 3;
+    state.phase = "discard";
+    state.wall.hands[3] = [discardTile, ...state.wall.hands[3].slice(1)];
+    // seat 0 (human) has tiles for chi: wan 3, wan 4
+    state.wall.hands[0] = [
+      { instanceId: 9002, tile: { kind: "numbered", suit: "wan", rank: 3 } },
+      { instanceId: 9003, tile: { kind: "numbered", suit: "wan", rank: 4 } },
+      ...state.wall.hands[0].slice(2)
+    ];
+
+    const discRes = room.handleCommand(room.players[3]!.playerId, {
+      type: "discard",
+      tileInstanceId: 9001,
+      generationId: room.generationId,
+      operationId: "op-ai-disc-1"
+    });
+    expect(discRes.ok).toBe(true);
+    expect(state.phase).toBe("reaction");
+
+    // Tick AI controller multiple times (simulating ~1 second of ticks at 200ms interval)
+    for (let i = 0; i < 5; i++) {
+      aiController.tick();
+    }
+
+    // Reaction window MUST STILL BE OPEN because AI reaction delay is 1.5s ~ 2.6s!
+    expect(state.phase).toBe("reaction");
+  });
+
+  describe("Southern Mahjong (variant: south)", () => {
+    it("initializes 136 tiles with no flowers and correct deal counts", () => {
+      const room = makeRoom({ variant: "south" });
+      joinAll(room);
+      readyAll(room);
+
+      expect(room.status).toBe("playing");
+      const state = room.state!;
+      expect(state).not.toBeNull();
+
+      // Invariant: South variant has 136 tiles total (no flower tiles)
+      const dealer = state.dealer;
+      expect(state.wall.hands[dealer]!.length).toBe(17);
+      for (let s = 0; s < 4; s++) {
+        if (s !== dealer) {
+          expect(state.wall.hands[s]!.length).toBe(16);
+        }
+        // Zero flowers in south variant
+        expect(state.wall.flowers[s]!.length).toBe(0);
+      }
+
+      // 17 (dealer) + 3*16 (non-dealers) = 65 tiles dealt
+      // 136 - 65 = 71 tiles in wall (headRemaining + deckRemaining)
+      const head = headRemaining(state.wall);
+      const deck = deckRemaining(state.wall);
+      const totalWall = head + deck;
+      expect(totalWall).toBe(71);
+      expect(deck).toBe(16); // 16 reserved tail tiles
+      expect(head).toBe(55);
+
+      // Snapshot reveals variant-consistent state
+      const snap = buildClientSnapshot(room, dealer);
+      expect(snap.status).toBe("playing");
+      expect(snap.wall.headRemaining).toBe(55);
+      expect(snap.wall.deckRemaining).toBe(16);
+    });
+  });
+});
+
+

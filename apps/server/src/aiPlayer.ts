@@ -22,6 +22,7 @@
 import type { GameState, Meld, TileInstance } from "@taiwan-mahjong/rules";
 import { chiOptions, detectWin, kongOptions, pengOptions, tileToId } from "@taiwan-mahjong/rules";
 import type { Room } from "./room.js";
+import { collectPendingKinds } from "./gameLoop.js";
 
 export type AiDifficulty = "easy" | "medium" | "hard";
 
@@ -37,6 +38,13 @@ export const AI_ACTION_DELAY_MS: Record<AiDifficulty, [number, number]> = {
   medium: [200, 700],
   hard: [120, 500],
 };
+
+/**
+ * Reaction-window delay — deliberately LONGER than general move delay, so a
+ * solo human has time to read the 吃/碰/槓/過 hint and click before an AI
+ * claims or passes. (General move throttle stays fast; only reactions slow.)
+ */
+export const AI_REACTION_DELAY_MS: [number, number] = [1500, 2600];
 
 // ---------------------------------------------------------------------------
 // Tile helpers (mirror qa-stress — the win-oriented heuristics)
@@ -318,6 +326,10 @@ export function decideReaction(
   if (state.phase !== "reaction" || state.lastDiscardBy === seat || !state.lastDiscard) {
     return null;
   }
+  // 只有「真的有吃/碰/槓資格」的座位才能表態；沒資格時回 null，不要為了
+  // 「走完整流程」送出 pass——否則會瞬間關掉別人的反應窗（pass 只關自家）。
+  const pending = collectPendingKinds(state);
+  if (!pending.has(seat)) return null;
 
   const claimBase: Record<AiDifficulty, number> = { easy: 0.25, medium: 0.55, hard: 0.85 };
 

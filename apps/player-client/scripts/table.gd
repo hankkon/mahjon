@@ -21,6 +21,11 @@ extends Control
 ## 避免中間快照造成畫面瞬間跳變。
 
 const TILE_BTN := preload("res://scenes/TileButton.tscn")
+## 手牌純函式工具（preload 引用，不依賴 editor global-class 掃描）。
+const HandUtils := preload("res://scripts/ui/hand_utils.gd")
+## 單向輸出 view：桌下 view（四河）與結算 view（面板）。
+const RIVER_VIEW := preload("res://scripts/ui/RiverView.gd")
+const SETTLEMENT_VIEW := preload("res://scripts/ui/SettlementView.gd")
 
 ## 雀魂風格色票
 const GOLD_TEXT := Color("#F3E5AB")
@@ -112,26 +117,45 @@ var _win_btn_tween: Tween
 @onready var settlement_backdrop: ColorRect = %SettlementBackdrop
 @onready var fan_list_container: VBoxContainer = %FanListContainer
 @onready var fx_layer: Control = %FXLayer
+@onready var river_view: Node = $RiverView
+@onready var settlement_view: Node = $SettlementView
+var hand_view: RefCounted
+var seat_panels_view: RefCounted
 
-## 棄牌河池化：每個河預先建立最多 6 個 TextureRect，render 時只更新 texture 與 visible，避免 queue_free + add_child。
-var _river_slots: Dictionary = {}  # GridContainer -> Array[TextureRect] (最多 24 個)
+func _get_hand_view() -> RefCounted:
+	if hand_view == null and hand_area != null:
+		var script = load("res://scripts/ui/HandView.gd")
+		if script:
+			hand_view = script.new(hand_area, hand_label, TILE_BTN, self)
+			hand_view.tile_clicked.connect(_on_tile_clicked)
+			hand_view.tile_discard_requested.connect(_on_tile_discard_requested)
+	return hand_view
+
+func _get_seat_panels_view() -> RefCounted:
+	if seat_panels_view == null:
+		var script = load("res://scripts/ui/SeatPanelsView.gd")
+		if script:
+			seat_panels_view = script.new(self)
+	return seat_panels_view
 
 func _ready() -> void:
+	_get_hand_view()
+	_apply_riichi_aesthetic_styles()
 	var you: int = GameState.you
 	var dirs := ["SouthPanel", "WestPanel", "NorthPanel", "EastPanel"]
 	for i in range(4):
 		var seat: int = (you + i) % 4
 		_seat_to_panel[seat] = dirs[i]
 
-	leave_btn.pressed.connect(_on_leave_pressed)
-	ready_btn.pressed.connect(func(): NetworkManager.mark_ready())
-	next_round_btn.pressed.connect(func(): NetworkManager.mark_ready())
-	chi_btn.pressed.connect(func(): _do_reaction("chi"))
-	peng_btn.pressed.connect(func(): _do_reaction("peng"))
-	kong_btn.pressed.connect(func(): _do_reaction("kong"))
-	pass_btn.pressed.connect(func(): NetworkManager.pass_reaction())
-	win_btn.pressed.connect(_on_win_btn_pressed)
-	# 動作按鈕：按壓下陷動效。
+	_bind_touch_btn(leave_btn, _on_leave_pressed)
+	_bind_touch_btn(ready_btn, func(): NetworkManager.mark_ready())
+	_bind_touch_btn(next_round_btn, func(): NetworkManager.mark_ready())
+	_bind_touch_btn(chi_btn, func(): _do_reaction("chi"))
+	_bind_touch_btn(peng_btn, func(): _do_reaction("peng"))
+	_bind_touch_btn(kong_btn, func(): _do_reaction("kong"))
+	_bind_touch_btn(pass_btn, func(): NetworkManager.pass_reaction())
+	_bind_touch_btn(win_btn, _on_win_btn_pressed)
+	# 動作按鈕：按壓下陷動效與音效。
 	for b: Button in [chi_btn, peng_btn, kong_btn, win_btn, pass_btn, ready_btn, next_round_btn]:
 		_add_press_nudge(b)
 
@@ -158,6 +182,24 @@ func _process(_delta: float) -> void:
 		return
 	_update_countdown()
 	_update_dealer_info()
+
+
+func _exit_tree() -> void:
+	# 離房／快速切場景：殺掉未完成的 Tween、丟棄未播動畫、清 pending 基準，
+	# 防止「場景已離開但 await/Tween 仍在跑」的崩潰或殘留狀態。
+	if _flash_tween and _flash_tween.is_valid():
+		_flash_tween.kill()
+		_flash_tween = null
+	if _win_btn_tween and _win_btn_tween.is_valid():
+		_win_btn_tween.kill()
+		_win_btn_tween = null
+	AnimationQueue.clear()
+	_pending_final_render = false
+	_last_hand = []
+	_last_discard_size = 0
+	_last_melds = {}
+	_hand_rendered_once = false
+
 
 
 # ---------------------------------------------------------------------------
@@ -196,6 +238,8 @@ func _refresh() -> void:
 
 func _render_lobby() -> void:
 	lobby_panel.visible = true
+	if not lobby_panel.gui_input.is_connected(_on_lobby_panel_input):
+		lobby_panel.gui_input.connect(_on_lobby_panel_input)
 	settlement_panel.visible = false
 	settlement_backdrop.visible = false
 	reaction_bar.visible = false
@@ -214,6 +258,12 @@ func _render_lobby() -> void:
 	# 準備按鈕：已準備就鎖定並顯示確認（避免重複送出）。
 	ready_btn.disabled = my_ready
 	ready_btn.text = "已準備 ✓（等待開始…）" if my_ready else "準備 (Ready)"
+
+
+func _on_lobby_panel_input(event: InputEvent) -> void:
+	if (event is InputEventScreenTouch or event is InputEventMouseButton) and event.pressed:
+		if ready_btn != null and not ready_btn.disabled:
+			NetworkManager.mark_ready()
 
 
 ## 牌局進行中：把「本次快照 vs 上次已渲染狀態」的差異拆解成動畫 job，
@@ -307,87 +357,19 @@ func _render_settlement() -> void:
 	# 音效 + 我胡牌特效（畫面震動 + 金色光芒擴散），只播一次。
 	if not _settlement_sounded:
 		_settlement_sounded = true
-		var winner: int = int(GameState.settlement.get("winner", -1)) \
-			if not GameState.settlement.is_empty() else -1
+		# winner 欄位允許 null（number | null）：null → -1，避免 int(null) 炸。
+		var winner: int = -1
+		if not GameState.settlement.is_empty():
+			var w: Variant = GameState.settlement.get("winner", -1)
+			winner = int(w) if w != null else -1
 		if winner == GameState.you:
 			AudioManager.play_win()
 			_play_win_fx()
 		AudioManager.play_settle()
 
-	var header: Array = []
-	header.append("莊家：%s（%s風 第 %d 局）" % [GameState.seat_name(GameState.dealer), _wind_name(GameState.dealer), GameState.dealer_streak])
-
-	var s: Dictionary = GameState.settlement
-	var line_index := 0
-	if s.is_empty():
-		# 流局（和局）— settlement 為 null，但仍可能因 resetForNextRound 回到 lobby。
-		header.append("流局（和局）")
-	else:
-		var winner: int = s.get("winner", -1)
-		header.append("贏家：%s" % GameState.seat_name(winner))
-		if s.get("selfDraw", false):
-			header.append("自摸")
-		elif s.get("kongDraw", false):
-			header.append("槓上開花")
-		elif GameState.last_discard_by >= 0:
-			header.append("放槍胡（%s 放槍）" % GameState.seat_name(GameState.last_discard_by))
-		var breakdown: Dictionary = s.get("breakdown", {})
-		if not breakdown.is_empty():
-			var fans: Array = breakdown.get("fans", [])
-			var total: int = int(breakdown.get("total", 0))
-			var fan_title := Label.new()
-			fan_title.text = "— 台數明細（共 %d 台）—" % total
-			fan_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-			_style_label(fan_title, _make_style(GLASS_BG, GOLD_BORDER, 6), GOLD_TEXT, 16)
-			_animate_settlement_line(fan_title, line_index)
-			line_index += 1
-			for f in fans:
-				var rule: String = f.get("rule", "?")
-				var val: int = int(f.get("value", 0))
-				var fl := Label.new()
-				fl.text = "✦ %s  +%d 台" % [rule, val]
-				fl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-				_style_label(fl, _make_style(Color(0.1, 0.08, 0.04, 0.8), GOLD_BORDER, 5), GOLD_TEXT, 15)
-				_animate_settlement_line(fl, line_index)
-				line_index += 1
-		if not s.get("ledger", []).is_empty():
-			var sep := Label.new()
-			sep.text = "— 分數結算 —"
-			sep.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-			_style_label(sep, _make_style(GLASS_BG, GOLD_BORDER, 6), GOLD_TEXT, 16)
-			_animate_settlement_line(sep, line_index)
-			line_index += 1
-			for e in s.get("ledger", []):
-				var seat: int = e.get("seat", -1)
-				var delta: int = e.get("delta", 0)
-				var scores: Array = s.get("scores", [])
-				var total_score: int = scores[seat] if seat >= 0 and seat < scores.size() else 0
-				var tag: String = "（莊）" if seat == GameState.dealer else ""
-				var sign: String = "+" if delta > 0 else ""
-				var cl := Label.new()
-				cl.text = "%s%s：%s%d 分（累計 %d）" % [GameState.seat_name(seat), tag, sign, delta, total_score]
-				cl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-				# 分數：正綠 + / 負紅 -。
-				_style_label(cl, _make_style(GLASS_BG, GOLD_BORDER, 6), \
-					SCORE_POS if delta > 0 else SCORE_NEG, 15)
-				_animate_settlement_line(cl, line_index)
-				line_index += 1
-	if not GameState.autoplay_log.is_empty():
-		var al := Label.new()
-		al.text = "自動託管：%s" % GameState.autoplay_summary()
-		al.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		_style_label(al, _make_style(GLASS_BG, GOLD_BORDER, 6), GOLD_TEXT_DIM, 14)
-		_animate_settlement_line(al, line_index)
-
-	settlement_detail.text = "\n".join(header)
-	# 「準備下一局」按鈕：已準備就鎖定並顯示確認。
-	var my_ready := false
-	for p in GameState.players:
-		if int(p.get("seat", -1)) == GameState.you and p.get("ready", false):
-			my_ready = true
-			break
-	next_round_btn.disabled = my_ready
-	next_round_btn.text = "已準備 ✓" if my_ready else "準備下一局"
+	# 結算面板顯示／隱藏、台數逐行、ledger、流局判定、下一局按鈕
+	# 已移到 scripts/ui/SettlementView.gd；此處只做音效/特效後委派。
+	settlement_view.show(GameState)
 
 
 func _update_top_status() -> void:
@@ -431,7 +413,12 @@ func _collect_anim_jobs(jobs: Array[Callable]) -> void:
 			if i < melds_arr.size() and seat == GameState.you \
 				and str(melds_arr[i].get("kind", "")) == "kong":
 				_play_kong_fx()
-			jobs.append(_job_meld_fly(seat, now[i]))
+			# _meld_signatures() 只存 meld id（int）；_job_meld_fly 需要完整
+			# meld Dictionary（claimed / tiles / kind）。從快照 melds_arr 取，
+			# 避免 int → Dictionary 型別炸裂。
+			var meld_data: Variant = melds_arr[i] if i < melds_arr.size() else null
+			if meld_data is Dictionary:
+				jobs.append(_job_meld_fly(seat, meld_data))
 
 
 ## 各家 meld id 清單（diff 用）。
@@ -463,10 +450,10 @@ func _job_draw_fly_in(tile: Dictionary) -> Callable:
 ## 並在落地瞬間播放棄牌音效。
 func _job_discard_fly_out(tile_id: String) -> Callable:
 	var seat: int = GameState.last_discard_by
-	var river: GridContainer = _river_for_seat(seat) as GridContainer
-	var slots: Array = _ensure_river_slots(river)
+	var panel_name: String = _seat_to_panel.get(seat, "")
+	var slots: Array = river_view.slots_for_panel(panel_name)
 	var slot_index: int = clampi(GameState.discards_for(seat).size(), 1, 24) - 1
-	var target: TextureRect = slots[slot_index]
+	var target: TextureRect = slots[slot_index] if slots.size() > 0 else null
 	var slot_size: Vector2 = target.custom_minimum_size if target != null else Vector2(48, 64)
 	var to_center: Vector2 = (target.global_position + slot_size / 2.0) \
 		if target != null and target.global_position != Vector2.ZERO else _discard_pool_pos()
@@ -642,156 +629,61 @@ func _update_dealer_info() -> void:
 # ---------------------------------------------------------------------------
 
 func _render_side_panels() -> void:
-	for seat in range(4):
-		var panel_name: String = _seat_to_panel.get(seat, "")
-		if panel_name == "":
-			continue
-		var box: VBoxContainer = get_node(panel_name)
-		# 清除舊的標題/張數標籤（保留 MeldArea / HandBacks 結構）。
-		for child in box.get_children():
-			if child is Label:
-				child.queue_free()
-		var p := _player_view(seat)
-		var who: String = "（我）" if seat == GameState.you else ""
-		var tag: String = _player_tag(seat, p)
-		var title := Label.new()
-		title.text = "%s %s (%d 張)%s%s" % [
-			GameState.seat_name(seat), _wind_name(seat), p.get("handCount", 0), who, tag,
-		]
-		_style_label(title, _make_style(GLASS_BG, GOLD_BORDER, 6), GOLD_TEXT, 15)
-		box.add_child(title)
-		box.move_child(title, 0)
-		_render_melds(seat)
-		# Majsoul compact opponent hand backs (back.png via TileLoader).
-		if seat != GameState.you and GameState.is_playing():
-			_render_hand_backs(seat)
+	var spv = _get_seat_panels_view()
+	if spv:
+		spv.render_side_panels(_seat_to_panel, opponent_backs, GameState)
 
 
-## 建立一張「牌背」TextureRect（使用 back.png 貼圖 exclusively via TileLoader.make_back_rect() for Majsoul compact opponent hands）。
 func _make_tile_back(tile_size: Vector2) -> TextureRect:
+	var spv = _get_seat_panels_view()
+	if spv:
+		return spv.make_tile_back(tile_size)
 	return TileLoader.make_back_rect(tile_size)
 
 
-## 對家/上家/下家：依 handCount 繪製 13-16 張牌背。
-## 北（上）→ 水平置中排列，牌背 26x36；西/東（左右）→ 緊湊直列，不拉伸佔滿螢幕。
 func _render_hand_backs(seat: int) -> void:
-	var panel_name: String = _seat_to_panel.get(seat, "")
-	if not opponent_backs.has(panel_name):
-		return
-	var box: Container = opponent_backs[panel_name]
-	for child in box.get_children():
-		child.queue_free()
-	var count: int = clampi(int(_player_view(seat).get("handCount", 0)), 13, 17)
-	var horizontal: bool = box is HBoxContainer
-	# 北（橫排）26x36；西/東（直列）緊湊 22x30，嚴禁拉伸成長條。
-	var tile_size := Vector2(26, 36) if horizontal else Vector2(22, 30)
-	# 直列（東西兩側）空間有限：最多 13 張，維持緊湊群組。
-	var show: int = count if horizontal else mini(count, 13)
-	for i in range(show):
-		box.add_child(_make_tile_back(tile_size))
+	var spv = _get_seat_panels_view()
+	if spv:
+		var panel_name: String = _seat_to_panel.get(seat, "")
+		spv.render_hand_backs(seat, panel_name, opponent_backs, _player_view(seat))
 
 
-## 莊 / 託管中 / 離線 視覺標籤。
 func _player_tag(seat: int, p: Dictionary) -> String:
-	var tags: Array = []
-	if seat == GameState.dealer:
-		tags.append("[莊]")
-	if p.get("autoplay", false):
-		tags.append("⚠託管中")
-	elif not p.get("connected", false):
-		tags.append("⚡離線")
-	if tags.is_empty():
-		return ""
-	return " " + " ".join(tags)
+	var spv = _get_seat_panels_view()
+	if spv:
+		return spv.player_tag(seat, p, GameState)
+	return ""
 
 
 func _render_melds(seat: int) -> void:
-	var panel_name: String = _seat_to_panel.get(seat, "")
-	var box: HBoxContainer = get_node("%s/MeldArea" % panel_name)
-	for child in box.get_children():
-		child.queue_free()
-	var p := _player_view(seat)
-	for m in p.get("melds", []):
-		var kind: String = str(m.get("kind", "?"))
-		var kind_tag := Label.new()
-		kind_tag.text = "[%s]" % kind
-		_style_label(kind_tag, _make_style(GLASS_BG, GOLD_BORDER, 4), GOLD_TEXT_DIM, 12)
-		box.add_child(kind_tag)
-		for t in m.get("tiles", []):
-			# Melds use TileLoader.make_tile_rect() exclusively (no text labels).
-			box.add_child(TileLoader.make_tile_rect(str(t), Vector2(40, 53)))
+	var spv = _get_seat_panels_view()
+	if spv:
+		var panel_name: String = _seat_to_panel.get(seat, "")
+		spv.render_melds(seat, panel_name, _player_view(seat))
 
 
 # ---------------------------------------------------------------------------
-# 中央棄牌區（全域）
+# 中央棄牌區（全域）— 渲染已移到 scripts/ui/RiverView.gd
+#   此處只保留：座次→河的只讀 helper，與最後棄牌大牌面（LastDiscardTile）。
 # ---------------------------------------------------------------------------
 
-## 座位 → 中央牌桌內側棄牌河（依 _seat_to_panel 方向對映）。
-func _river_for_seat(seat: int) -> Control:
+## 座位 → 側名（bottom/top/left/right；依 _seat_to_panel 座次對映）。
+func _seat_side(seat: int) -> String:
 	var panel_name: String = _seat_to_panel.get(seat, "")
-	match panel_name:
-		"SouthPanel":
-			return river_bottom
-		"NorthPanel":
-			return river_top
-		"WestPanel":
-			return river_left
-		"EastPanel":
-			return river_right
-	return river_bottom
+	return river_view.side_for_panel(panel_name)
 
 
-## 確保某個棄牌河的池化槽位已建立（最多 24 個 TextureRect = 4 行 × 6 列）。
-## 第一次呼叫時建立並加入 river，之後重用；超過 24 張時只顯示最新 24 張。
-func _ensure_river_slots(river: GridContainer) -> Array:
-	if _river_slots.has(river):
-		return _river_slots[river]
-	var slots: Array = []
-	# 決定此河的牌面尺寸（西/東側直列可換行空間小 → 縮小避免打爆 layout）。
-	var sz := Vector2(32, 42)
-	if river == river_left or river == river_right:
-		sz = Vector2(16, 22)
-	for i in range(24):
-		var tr := TextureRect.new()
-		tr.custom_minimum_size = sz
-		tr.size = sz
-		tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		tr.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
-		tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		tr.visible = false
-		river.add_child(tr)
-		slots.append(tr)
-	_river_slots[river] = slots
-	return slots
-
-
-## 離開 playing 狀態時隱藏所有河槽位（避免殘留畫面）。
+## 離開 playing 狀態時隱藏所有河槽位（委派 RiverView）。
 func _hide_all_river_slots() -> void:
-	for river in _river_slots.keys():
-		for tr in _river_slots[river]:
-			tr.visible = false
+	river_view.hide_all()
 
 
-## 中央牌桌內側棄牌河：四家各收納在牌桌四邊內側（下/上/左/右）。
-## Bottom/Top 每行 6 張（4 行 × 6 列 = 24 張）；Left/Right 垂直緊湊直列。
-## 超過 24 張只顯示最新 24 張。使用池化槽位，只更新 texture 與 visible，不重建節點。
+## 中央四河刷新（委派 RiverView；超過 24 張只顯示最新 24 張）。
 func _render_discard_pool() -> void:
+	var seat_to_side := {}
 	for seat in range(4):
-		var river: GridContainer = _river_for_seat(seat) as GridContainer
-		var slots: Array = _ensure_river_slots(river)
-		var tiles: Array = GameState.discards_for(seat)
-		# 超過 24 張只顯示最新 24 張（台灣一局每人最多約 20-24 張出牌）。
-		if tiles.size() > 24:
-			tiles = tiles.slice(tiles.size() - 24)
-		for i in range(24):
-			var tr: TextureRect = slots[i]
-			if i < tiles.size():
-				var tile_id: String = str(tiles[i])
-				TileLoader.apply_face(tr, tile_id)
-				tr.visible = true
-			else:
-				tr.visible = false
+		seat_to_side[seat] = _seat_side(seat)
+	river_view.refresh(seat_to_side, GameState.discards_by_seat)
 
 
 ## 中央「最後棄牌」大牌面（LastDiscardTile 貼圖；無牌時隱藏）。
@@ -823,128 +715,34 @@ const FLOWER_RANK := {
 }
 
 
-## 單張牌的排序鍵：花色優先，同花色由小到大。
+## 單張牌的排序鍵：花色優先，同花色由小到大（委派 HandUtils 純函式）。
 func _tile_sort_key(t: Dictionary) -> int:
-	var parts := str(t.get("id", "")).split(":")
-	if parts.size() < 2:
-		return 999999
-	var cat: String = parts[0]
-	var val: String = parts[1]
-	var rank: int = int(SUIT_RANK.get(cat, 9))
-	var num := 0
-	if cat == "honor":
-		num = int(HONOR_RANK.get(val, 0))
-	elif cat == "flower":
-		num = int(FLOWER_RANK.get(val, 0))
-	else:
-		num = val.to_int()
-	return rank * 1000 + num
+	return HandUtils.tile_sort_key(t)
 
 
 ## 回傳「依麻將花色與順序排序後」的手牌（同張以 instanceId 穩定排序）。
 func _sorted_hand(hand: Array) -> Array:
-	var out: Array = hand.duplicate()
-	out.sort_custom(func(a, b) -> bool:
-		var ka := _tile_sort_key(a)
-		var kb := _tile_sort_key(b)
-		if ka != kb:
-			return ka < kb
-		return int(a.get("instanceId", -1)) < int(b.get("instanceId", -1)))
-	return out
+	return HandUtils.sorted_hand(hand)
 
 
 func _render_hand() -> void:
-	var full_hand: Array = _sorted_hand(GameState.my_hand())
-	hand_label.text = "我的手牌（%d 張）" % full_hand.size()
-	var split := _split_drawn_tile(full_hand)
-	var hand: Array = split[0]
-	var drawn: Variant = split[1]
-	var animating: bool = AnimationQueue.is_playing()
-	var can_play: bool = GameState.is_my_discard_turn() \
-		and not GameState.is_autoplay(GameState.you) and not animating
-	if _hand_equals(full_hand):
-		if not _order_equals(full_hand):
-			# 相同牌、不同順序（自動理牌）→ 平滑重排，不重建按鈕。
-			_animate_hand_reflow(hand, can_play)
-		else:
-			_apply_playability_all(can_play)
-		_render_draw_spacer(drawn, can_play)
-		_last_hand = full_hand.duplicate()
-		return
-	if _last_hand.is_empty():
-		# 首次發牌 / 重連：直接畫最終排序狀態（無動畫，避免閃現跳動）。
-		_rebuild_hand_sync(hand, can_play)
-	else:
-		# 摸牌 / 吃碰槓 / 棄牌：平滑合併重排（保留按鈕、滑動到位）。
-		_animate_hand_reflow(hand, can_play)
-	_render_draw_spacer(drawn, can_play)
-	_last_hand = full_hand.duplicate()
+	var hv = _get_hand_view()
+	if hv:
+		hv.render_hand(GameState, AnimationQueue.is_playing())
 
 
-## 以「伺服器權威 lastDrawnTile → 上一幀集合差異 → 最後一張」的優先序辨識
-## 本回合真正摸進的牌（不可用 max-instanceId — 牌牆建牌先編號再洗牌，
-## instanceId 與摸牌順序無關）。供摸牌分離與摸牌動畫共用，避免兩套邏輯分歧。
 func _resolve_newly_added_tile(hand: Array) -> Variant:
-	if hand.is_empty():
-		return null
-	var newest: Variant = null
-	# 1) 伺服器權威：lastDrawnTile 就是本回合真正摸進的牌（GameState 註解明確：
-	#    優先以它辨識第 17 張，可精確抓出「真正摸進」的那張）。
-	if GameState.last_drawn_by == GameState.you and not GameState.last_drawn_tile.is_empty():
-		var wanted := int(GameState.last_drawn_tile.get("instanceId", -1))
-		for t in hand:
-			if int(t.get("instanceId", -1)) == wanted:
-				newest = t
-				break
-	# 2) 無伺服器權威可比（lastDrawnTile 已清空 / 非我摸牌，如吃碰後）：以「上一幀
-	#    手牌」集合差異找出真正新增的 instanceId（修復摸牌跳牌）。
-	if newest == null and not _last_hand.is_empty():
-		var prev_ids := {}
-		for t in _last_hand:
-			prev_ids[int(t.get("instanceId", -1))] = true
-		var candidates: Array = []
-		for t in hand:
-			if not prev_ids.has(int(t.get("instanceId", -1))):
-				candidates.append(t)
-		if candidates.size() >= 1:
-			newest = candidates[0]
-	# 3) 終極 fallback（正常不應發生）：退回排序後最後一張。
-	if newest == null:
-		newest = hand[hand.size() - 1]
-	return newest
+	var hv = _get_hand_view()
+	if hv:
+		return hv.hv_resolve_newly_added_tile(hand, GameState)
+	return null
 
 
 func _split_drawn_tile(hand: Array) -> Array:
-	if hand.size() != 17 or not GameState.is_my_discard_turn():
-		return [hand, null]
-	var newest: Variant = _resolve_newly_added_tile(hand)
-	var base: Array = hand.duplicate()
-	base.erase(newest)
-	return [base, newest]
-
-
-## 摸牌分離鐵律：第 17 張摸牌「絕對禁止」建立獨立於手牌容器之外的浮動節點。
-## 正確做法：在 PlayerHandContainer（hand_area）第 16 張與第 17 張之間動態插入
-## 一個寬度剛好 18px 的透明 Control 間隔器，再將第 17 張牌作為該 HBox 最後一個子節點。
-func _render_draw_spacer(drawn: Variant, can_play: bool) -> void:
-	# 移除既有的間隔器與舊摸牌按鈕（若存在）。
-	for child in hand_area.get_children():
-		if child is Control and child.has_meta("draw_spacer"):
-			child.queue_free()
-		elif child is Button and child.has_meta("is_drawn_tile"):
-			child.queue_free()
-	if drawn == null:
-		return
-	# 建立 18px 透明間隔器，插在第 16 張（最後一張基礎牌）之後。
-	var spacer := Control.new()
-	spacer.custom_minimum_size = Vector2(18, 0)
-	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	spacer.set_meta("draw_spacer", true)
-	hand_area.add_child(spacer)
-	# 第 17 張牌作為 HBox 最後一個子節點（與前 16 張同一容器）。
-	var btn: Button = _create_tile_button(drawn, can_play)
-	btn.set_meta("is_drawn_tile", true)
-	hand_area.add_child(btn)
+	var hv = _get_hand_view()
+	if hv:
+		return hv.hv_split_drawn_tile(hand, GameState)
+	return [hand, null]
 
 
 ## 建立一張手牌按鈕並套用完整狀態（可出牌、選中、胡光暈、算牌高亮）。
@@ -958,104 +756,6 @@ func _create_tile_button(t: Dictionary, can_play: bool) -> Button:
 		btn.tile_discarded.connect(_on_tile_discard_requested)
 		_apply_tile_extras(btn)
 	return btn
-
-
-## 同步重建手牌（首發 / 重連，無動畫）。
-func _rebuild_hand_sync(hand: Array, can_play: bool) -> void:
-	for child in hand_area.get_children():
-		child.queue_free()
-	for t in hand:
-		hand_area.add_child(_create_tile_button(t, can_play))
-
-
-## 只更新可出牌 / 選中 / 胡光暈 / 算牌高亮（手牌內容與順序皆不變）。
-## 第 17 張摸牌已融合於 hand_area 內，故單一迴圈即可涵蓋全部手牌按鈕。
-func _apply_playability_all(can_play: bool) -> void:
-	for child in hand_area.get_children():
-		if child is Button:
-			if child.has_method("apply_playability"):
-				child.apply_playability(can_play)
-				_apply_tile_extras(child)
-			else:
-				child.modulate.a = 1.0 if can_play else 0.85
-				child.disabled = not can_play
-
-
-## 手牌平滑重排（自動理牌動畫）：
-##   * 仍存在的手牌 → 平滑滑動到排序後的新位置（HBox 重排後 Tween）
-##   * 被移除的牌 → 淡出後移除
-##   * 新加入的牌 → 淡入
-## 純視覺動畫（不進 AnimationQueue，不影響出牌輸入鎖定）。
-func _animate_hand_reflow(hand: Array, can_play: bool) -> void:
-	var from_pos := {}
-	var old_buttons := {}
-	for child in hand_area.get_children():
-		if child is Button and "instance_id" in child:
-			from_pos[child.instance_id] = child.global_position
-			old_buttons[child.instance_id] = child
-	# 1) 已不存在的手牌 → 淡出移除。
-	#    第 17 張摸牌（meta is_drawn_tile）已融合於 hand_area，視為常駐，不得移除。
-	var keep_ids := {}
-	for t in hand:
-		keep_ids[int(t.get("instanceId", -1))] = true
-	for child in hand_area.get_children():
-		if child is Button and child.has_meta("is_drawn_tile"):
-			keep_ids[int(child.instance_id)] = true
-	for inst in old_buttons:
-		if not keep_ids.has(inst):
-			var btn: Button = old_buttons[inst]
-			var tw := create_tween()
-			tw.tween_property(btn, "modulate:a", 0.0, 0.15)
-			tw.tween_callback(btn.queue_free)
-	# 2) 依排序順序重新排列既有按鈕（move_child → HBox 自動重排）。
-	#    只重排前 16 張基礎牌；間隔器與第 17 張摸牌保持在容器末端。
-	for i in range(hand.size()):
-		var inst := int(hand[i].get("instanceId", -1))
-		var btn = old_buttons.get(inst)
-		if btn != null and hand_area.get_children().find(btn) != i:
-			hand_area.move_child(btn, i)
-	# 3) 新增的手牌 → 建立按鈕 + 淡入。
-	for i in range(hand.size()):
-		var inst := int(hand[i].get("instanceId", -1))
-		if old_buttons.has(inst):
-			continue
-		var btn: Button = _create_tile_button(hand[i], can_play)
-		hand_area.add_child(btn)
-		hand_area.move_child(btn, i)
-		btn.modulate.a = 0.0
-		var tw := create_tween()
-		tw.tween_property(btn, "modulate:a", 1.0, 0.25)
-	# 4) 同步套用可出牌狀態（解除動畫鎖定）；重排期間暫停上浮，避免 Tween 衝突。
-	for child in hand_area.get_children():
-		if child is Button and "instance_id" in child:
-			if child.has_method("set_suppress_lift"):
-				child.set_suppress_lift(true)
-			if child.has_method("apply_playability"):
-				child.apply_playability(can_play)
-	# 5) 等一幀讓 HBox 套用新排序位置，再平滑滑動舊位置 → 新位置。
-	await get_tree().process_frame
-	var last_tw: Tween = null
-	for child in hand_area.get_children():
-		if child is Button and "instance_id" in child and keep_ids.has(child.instance_id):
-			var new_gp: Vector2 = child.global_position
-			var old: Variant = from_pos.get(child.instance_id)
-			if old != null and old != new_gp:
-				child.global_position = old
-				var tw := create_tween()
-				tw.tween_property(child, "global_position", new_gp, 0.22) \
-					.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-				last_tw = tw
-	if last_tw:
-		await last_tw.finished
-	# 6) 動畫結束：更新基準位置，恢復上浮，並套用選中 / 胡光暈 / 算牌高亮。
-	for child in hand_area.get_children():
-		if child is Button and "instance_id" in child and keep_ids.has(child.instance_id):
-			if child.has_method("reset_base_position"):
-				child.reset_base_position()
-			if child.has_method("set_suppress_lift"):
-				child.set_suppress_lift(false)
-			if child.has_method("apply_playability"):
-				_apply_tile_extras(child)
 
 
 ## 依目前快照套用：胡牌光暈（canWin）與選中框。
@@ -1081,6 +781,8 @@ func _apply_tile_extras(btn: Button) -> void:
 ## 更新選中 instanceId，並同步所有手牌按鈕的選中/算牌高亮與棄牌池同款高亮。
 func _set_selection(instance_id: int) -> void:
 	_selected_instance_id = instance_id
+	if hand_view:
+		hand_view.set_selection(instance_id)
 	for child in hand_area.get_children():
 		if child is Button and child.has_method("set_selected"):
 			_apply_tile_extras(child)
@@ -1111,8 +813,10 @@ func _highlight_discard_matches() -> void:
 				and int(child.instance_id) == _selected_instance_id:
 				selected_tile_id = str(child.tile_id)
 				break
-	for river in _river_slots.keys():
-		for tr in _river_slots[river]:
+	if river_view and river_view.has_method("highlight_matches"):
+		river_view.highlight_matches(selected_tile_id)
+	else:
+		for tr in river_view.all_slots():
 			if selected_tile_id != "" and tr.visible \
 				and str(tr.get_meta("tile_id", "")) == selected_tile_id:
 				tr.modulate = Color(1.3, 1.15, 0.7, 1.0)
@@ -1128,10 +832,10 @@ func _update_last_discard_marker() -> void:
 		_last_discard_marker.visible = false
 		return
 	var seat: int = GameState.last_discard_by
-	var river: GridContainer = _river_for_seat(seat) as GridContainer
-	var slots: Array = _ensure_river_slots(river)
+	var panel_name: String = _seat_to_panel.get(seat, "")
+	var slots: Array = river_view.slots_for_panel(panel_name)
 	var slot_index: int = clampi(GameState.discards_for(seat).size(), 1, 24) - 1
-	var target: TextureRect = slots[slot_index]
+	var target: TextureRect = slots[slot_index] if slots.size() > 0 else null
 	if target == null or target.global_position == Vector2.ZERO:
 		_last_discard_marker.visible = false
 		return
@@ -1143,25 +847,12 @@ func _update_last_discard_marker() -> void:
 
 ## 手牌內容是否相同（以 instanceId 集合比對，順序無關 — 排序屬客戶端美化）。
 func _hand_equals(hand: Array) -> bool:
-	if hand.size() != _last_hand.size():
-		return false
-	var set_a := {}
-	for t in hand:
-		set_a[int(t.get("instanceId", -1))] = true
-	for t in _last_hand:
-		if not set_a.has(int(t.get("instanceId", -1))):
-			return false
-	return true
+	return HandUtils.hand_equals(hand, _last_hand)
 
 
 ## 手牌順序是否完全相同（依序比對 instanceId）。
 func _order_equals(hand: Array) -> bool:
-	if hand.size() != _last_hand.size():
-		return false
-	for i in range(hand.size()):
-		if int(hand[i].get("instanceId", -1)) != int(_last_hand[i].get("instanceId", -1)):
-			return false
-	return true
+	return HandUtils.order_equals(hand, _last_hand)
 
 
 # ---------------------------------------------------------------------------
@@ -1244,6 +935,37 @@ func _make_style(bg: Color, border: Color, radius: int = 6, border_w: int = 1) -
 	sb.shadow_size = 3
 	sb.shadow_offset = Vector2(0, 2)
 	return sb
+
+
+## 綁定按鈕點擊與手機觸控 ScreenTouch 備用事件，確保行動裝置瀏覽器 100% 響應。
+func _bind_touch_btn(btn: Button, action: Callable) -> void:
+	if not btn:
+		return
+	btn.pressed.connect(action)
+	btn.gui_input.connect(func(event: InputEvent):
+		if event is InputEventScreenTouch and event.pressed:
+			if not btn.disabled:
+				action.call()
+	)
+
+
+## 套用雀魂風格視覺強化（暗深綠漸層桌紋、木紋邊框、半透明黑金玻璃頂欄與內沉棄牌/副露底板）。
+func _apply_riichi_aesthetic_styles() -> void:
+	if table_center:
+		var center_sb := StyleBoxFlat.new()
+		center_sb.bg_color = Color("#1b4332")
+		center_sb.border_color = Color("#3d2314")
+		center_sb.border_width_left = 6
+		center_sb.border_width_right = 6
+		center_sb.border_width_top = 6
+		center_sb.border_width_bottom = 6
+		center_sb.corner_radius_top_left = 12
+		center_sb.corner_radius_top_right = 12
+		center_sb.corner_radius_bottom_left = 12
+		center_sb.corner_radius_bottom_right = 12
+		center_sb.shadow_color = Color(0, 0, 0, 0.45)
+		center_sb.shadow_size = 6
+		table_center.add_theme_stylebox_override("panel", center_sb)
 
 
 ## 套用樣式到 Label（背景 StyleBox + 文字色 + 字號）。
@@ -1374,17 +1096,4 @@ func _play_gold_burst(label_text: String) -> void:
 	tw2.tween_callback(lbl.queue_free)
 
 
-## 結算面板逐項淡入上滑（加入 FanListContainer 後動畫）。
-func _animate_settlement_line(lbl: Label, index: int) -> void:
-	fan_list_container.add_child(lbl)
-	lbl.modulate.a = 0.0
-	await get_tree().process_frame
-	if not is_instance_valid(lbl) or lbl.get_parent() != fan_list_container:
-		return
-	var base: Vector2 = lbl.position
-	lbl.position = base + Vector2(0, 14)
-	var tw := create_tween()
-	tw.tween_interval(0.06 * index)
-	tw.tween_property(lbl, "position", base, 0.32) \
-		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	tw.parallel().tween_property(lbl, "modulate:a", 1.0, 0.32)
+## 結算面板內容渲染已移到 scripts/ui/SettlementView.gd（含逐行淡入動畫）。

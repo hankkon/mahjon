@@ -1,0 +1,25 @@
+# fly.toml — Fly.io deployment configuration for Taiwan Mahjong Server
+
+app = "taiwan-mahjong-server"
+primary_region = "nrt"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "3000"
+  ENABLE_AI = "true"
+  VARIANT = "north"
+  TIMEOUT_MS = "15000"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 500
+    soft_limit = 250

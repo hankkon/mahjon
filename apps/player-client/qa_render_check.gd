@@ -405,8 +405,8 @@ func _scenario_g() -> void:
 	_check("G：第 17 張摸牌融合於 hand_area（無獨立 DrawSlot）",
 		drawn_btn != null and btn_count == 17,
 		"按鈕 %d 顆" % btn_count)
-	_check("G：第 16/17 張之間有 18px 透明間隔器",
-		spacer != null and spacer.custom_minimum_size.x == 18.0,
+	_check("G：第 16/17 張之間有 24px 透明間隔器（明顯空格）",
+		spacer != null and spacer.custom_minimum_size.x == 24.0,
 		"spacer 寬=%s" % (str(spacer.custom_minimum_size.x) if spacer else "無"))
 	# G2：間隔器與第 17 張摸牌必須位於容器末端（最後兩個子節點）。
 	var last_idx: int = children.size() - 1
@@ -475,6 +475,43 @@ func _scenario_g2() -> void:
 		"rendered=%d" % rendered_drawn)
 
 
+## 情境 MULTI-ROUND：連續打了三手後，手牌 24px 間隔器不得重複累積，間距保持精確固定。
+func _scenario_multi_round() -> void:
+	print("\n================= 情境 MULTI-ROUND：連續多局手牌與間隔器無記憶體/節點累積 =================")
+	for round_num in range(1, 4):
+		var snap := _playing_snap(0)
+		snap["generationId"] = 100 + round_num
+		snap["status"] = "playing"
+		snap["phase"] = "discard"
+		snap["turn"] = GameState.you
+		snap["lastDrawnBy"] = GameState.you
+		# 手牌 17 張
+		var hand17: Array = []
+		for i in range(16):
+			hand17.append({"instanceId": round_num * 1000 + i, "id": "wan:%d" % ((i % 9) + 1)})
+		var drawn_inst: int = round_num * 1000 + 88
+		hand17.append({"instanceId": drawn_inst, "id": "tiao:8"})
+		snap["lastDrawnTile"] = {"instanceId": drawn_inst, "id": "tiao:8"}
+		snap["players"][0]["hand"] = hand17
+		snap["players"][0]["handCount"] = 17
+		GameState.apply_snapshot(snap)
+		await get_tree().process_frame
+		await get_tree().process_frame
+
+		var hand_area: HBoxContainer = _table.get_node("%HandArea")
+		var spacer_count := 0
+		var spacer_width := 0.0
+		for child in hand_area.get_children():
+			if child is Control and child.has_meta("draw_spacer"):
+				spacer_count += 1
+				spacer_width = child.custom_minimum_size.x
+
+		_check("MULTI-ROUND：第 %d 局摸牌間隔器數量剛好為 1 個（無重複累積）" % round_num,
+			spacer_count == 1, "第 %d 局 實際 spacer 數=%d" % [round_num, spacer_count])
+		_check("MULTI-ROUND：第 %d 局摸牌間距保持 24px（無漸進拉大）" % round_num,
+			spacer_width == 24.0, "第 %d 局 實際 spacer 寬=%.1f" % [round_num, spacer_width])
+
+
 func _scenario_h() -> void:
 	print("\n================= 情境 H：Wikimedia 3D 圖庫字牌貼圖對應 =================")
 	# 後端 honor 代號 → Wikimedia 3D 圖庫檔名（tile_loader.gd HONOR_TO_WIKIMEDIA）。
@@ -531,6 +568,8 @@ func _scenario_i() -> void:
 			apply_detail += "%s(tex=%s,meta=%s) " % [
 				tile_id, tr.texture != null, tr.get_meta("tile_id", "")]
 	_check("I：apply_face() 正確塞入 TextureRect 並同步 meta", apply_ok, apply_detail.strip_edges())
+	tr.free()
+
 	# 3) 所有合法 TileId 都應回傳非空貼圖（涵蓋萬筒條/字/花/牌背）。
 	var all_tex_ok := true
 	var tex_detail := ""
@@ -618,6 +657,88 @@ func _scenario_d() -> void:
 	_check("D：準備下一局按鈕可用", next_btn.visible and not next_btn.disabled)
 
 
+func _scenario_draw() -> void:
+	print("\n================= 情境 DRAW：流局結算（winner=null 不崩潰） =================")
+	var you := 0
+	var snap: Dictionary = _ended_snap()
+	snap["status"] = "ended"
+	snap["winner"] = null
+	# server 流局時 settlement 非空（全 0 ledger），但 winner/breakdown 皆 null。
+	snap["settlement"] = {
+		"winner": null, "selfDraw": false, "kongDraw": false,
+		"breakdown": null,
+		"ledger": [
+			{"seat": 0, "delta": 0},
+			{"seat": 1, "delta": 0},
+			{"seat": 2, "delta": 0},
+			{"seat": 3, "delta": 0},
+		],
+		"scores": [0, 0, 0, 0],
+	}
+	GameState.apply_snapshot(snap)
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	# 流局 → 結算面板顯示「流局」，不得崩潰、不印「贏家」。
+	var settlement_panel: PanelContainer = _table.get_node("%SettlementPanel")
+	_check("DRAW：流局結算面板顯示", settlement_panel.visible)
+	var detail: Label = _table.get_node("%SettlementDetail")
+	_check("DRAW：結算標題含「流局」", detail.text.contains("流局"),
+		"text=%s" % detail.text)
+	_check("DRAW：流局不誤印「贏家」", not detail.text.contains("贏家："),
+		"text=%s" % detail.text)
+
+
+## 情境 NULL-SNAP：settlement=null 且 winner=null（playing 快照）不得崩潰。
+## 這是「反應窗開啟中」或「剛發牌」等 server 不填 settlement 的常見路徑。
+func _scenario_null_settlement() -> void:
+	print("\n================= 情境 NULL-SNAP：settlement/winner/breakdown 全 null =================" )
+	# 快照：playing 狀態，所有 nullable 字段皆為 null。
+	var snap: Dictionary = _playing_snap(0, {}, 13)
+	snap["winner"] = null
+	snap["settlement"] = null
+	snap["lastDiscard"] = null
+	snap["lastDiscardBy"] = null
+	snap["lastDrawnTile"] = null
+	snap["reactionHint"] = null
+	snap["phaseDeadline"] = null
+	snap["countdownMs"] = null
+	snap["autoplayLog"] = null
+	GameState.apply_snapshot(snap)
+	await get_tree().process_frame
+	# 只要不崩潰、GameState 無丟 null 進 typed int 即通過。
+	_check("NULL-SNAP：apply_snapshot 全 null nullable 不崩潰", true)
+	_check("NULL-SNAP：winner 落地為 -1", GameState.winner == -1,
+		"got %d" % GameState.winner)
+	_check("NULL-SNAP：last_discard_by 落地為 -1", GameState.last_discard_by == -1,
+		"got %d" % GameState.last_discard_by)
+	_check("NULL-SNAP：countdown_ms 落地為 -1", GameState.countdown_ms == -1,
+		"got %d" % GameState.countdown_ms)
+	_check("NULL-SNAP：autoplay_log 落地為空陣列", GameState.autoplay_log == [],
+		"got %s" % str(GameState.autoplay_log))
+
+	# 流局快照（ended + settlement 含 null winner/breakdown）確認 _render_settlement 不崩。
+	var draw_snap: Dictionary = _ended_snap()
+	draw_snap["winner"] = null
+	draw_snap["settlement"] = {
+		"winner": null, "selfDraw": false, "kongDraw": false,
+		"breakdown": null,
+		"ledger": [
+			{"seat": 0, "delta": 0}, {"seat": 1, "delta": 0},
+			{"seat": 2, "delta": 0}, {"seat": 3, "delta": 0},
+		],
+		"scores": [0, 0, 0, 0],
+	}
+	GameState.apply_snapshot(draw_snap)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var settlement_panel: PanelContainer = _table.get_node("%SettlementPanel")
+	_check("NULL-SNAP：流局結算面板顯示（settlement.winner=null）", settlement_panel.visible)
+	var detail: Label = _table.get_node("%SettlementDetail")
+	_check("NULL-SNAP：流局不誤印「贏家：」", not detail.text.contains("贏家："),
+		"text=%s" % detail.text)
+
+
 func _ready() -> void:
 	# 在專案正常啟動（autoload 已載入）後載入 Table.tscn。
 	_table = TableScene.instantiate()
@@ -631,10 +752,13 @@ func _run() -> void:
 	await _scenario_b()
 	await _scenario_c()
 	await _scenario_d()
+	await _scenario_draw()
+	await _scenario_null_settlement()
 	await _scenario_e()
 	await _scenario_f()
 	await _scenario_g()
 	await _scenario_g2()
+	await _scenario_multi_round()
 	await _scenario_h()
 	await _scenario_i()
 

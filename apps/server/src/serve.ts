@@ -15,7 +15,9 @@ const port = Number(process.env.PORT ?? 3000);
 const variant = (process.env.VARIANT === "south" ? "south" : "north") as "north" | "south";
 const timeoutMs = Number(process.env.TIMEOUT_MS ?? 15_000);
 
-const server = await startServer({ port, host: "0.0.0.0", variant, timeoutMs });
+const enableAi = process.env.ENABLE_AI === "true" || process.env.ENABLE_AI === "1";
+
+const server = await startServer({ port, host: "0.0.0.0", variant, timeoutMs, enableAi });
 
 console.log(`[${SERVER_NAME}] protocol v${PROTOCOL_VERSION} variant=${variant}`);
 console.log(`[${SERVER_NAME}] thinking-timeout=${timeoutMs}ms`);

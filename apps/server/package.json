@@ -11,8 +11,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "serve": "node dist/apps/server/src/serve.js",
     "serve:web": "node dist/apps/server/src/serve-web.js",
-    "start": "node dist/apps/server/src/serve.js",
-    "dev": "node --watch dist/apps/server/src/serve.js",
+    "start": "node dist/apps/server/src/serve-web.js",
+    "dev": "tsx watch src/serve.ts",
+    "dev:web": "tsx watch src/serve-web.ts",
     "simulate": "node dist/apps/server/src/scripts/simulate-match.js"
   },
   "dependencies": {
@@ -22,6 +23,7 @@
   "devDependencies": {
     "@types/node": "^22.10.0",
     "@types/ws": "^8.5.13",
+    "tsx": "^4.19.2",
     "typescript": "^5.7.0"
   }
 }

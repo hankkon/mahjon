@@ -62,8 +62,25 @@ func _ready() -> void:
 	pressed.connect(_on_pressed)
 	mouse_entered.connect(_on_mouse_entered)
 	mouse_exited.connect(_on_mouse_exited)
+	gui_input.connect(_on_gui_input)
 	# 加入場景樹後再刷一次（setup() 可能在進入樹前就被呼叫，@onready 尚未就緒）。
 	_refresh_appearance()
+
+
+func _on_gui_input(event: InputEvent) -> void:
+	if event is InputEventScreenTouch and event.pressed:
+		if not disabled:
+			_on_pressed()
+
+
+func _exit_tree() -> void:
+	if _scale_tween and _scale_tween.is_valid():
+		_scale_tween.kill()
+		_scale_tween = null
+	if _pulse_tween and _pulse_tween.is_valid():
+		_pulse_tween.kill()
+		_pulse_tween = null
+
 
 
 ## 載入牌面 / 牌背貼圖（統一走 TileLoader，絕不出現純文字）。

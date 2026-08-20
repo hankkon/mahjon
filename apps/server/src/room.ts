@@ -142,6 +142,13 @@ export class Room implements RoomLike {
   private timeoutHandle: NodeJS.Timeout | null = null;
   /** operationId dedup — executed commands only. */
   private readonly executed = new Set<string>();
+  /**
+   * Seats that already passed in the CURRENT reaction window. A pass only
+   * removes that seat's pending kinds — the window closes only after EVERY
+   * pending seat passes (or a claim resolves it). Prevents a single unrelated
+   * pass (e.g. an AI with no claim rights) from killing the human's window.
+   */
+  private pendingPasses = new Set<number>();
 
   constructor(options: RoomOptions) {
     this.id = options.id;
@@ -370,6 +377,8 @@ export class Room implements RoomLike {
       return;
     }
     // 2. No win: reaction window for kong/peng/chi — phase stays "reaction".
+    //    Fresh window → clear the per-window pass bookkeeping.
+    this.pendingPasses.clear();
     const pending = collectPendingKinds(state);
     if (pending.size === 0) {
       // 3. Nobody can react: pass the turn (next seat draws).
@@ -506,10 +515,27 @@ export class Room implements RoomLike {
     if (state.phase !== "reaction") {
       return { ok: false, error: { code: "wrong_phase", message: "No reaction window open" } };
     }
-    void seat;
+    // Pass semantics:
+    //  - An eligible (pending) seat's pass only removes ITS right; the window
+    //    stays open until EVERY pending seat has passed (prevents one AI pass
+    //    from killing the human's window).
+    //  - A pass from a NON-pending seat (the discarder, or scripts/tests that
+    //    force-close the window) still closes it — preserves the legacy flow.
+    const pending = collectPendingKinds(state);
+    if (pending.has(seat)) {
+      this.pendingPasses.add(seat);
+      const allPendingPassed = [...pending.keys()].every((s) => this.pendingPasses.has(s));
+      if (!allPendingPassed) return { ok: true };
+    } else if (seat !== state.lastDiscardBy && pending.size > 0) {
+      // Ignore pass from non-discarder, non-eligible seats so AI tick races don't kill the window.
+      return { ok: true };
+    }
+    this.pendingPasses.clear();
     this.passTurnAfterUnclaimed();
     return { ok: true };
   }
+
+
 
   /**
    * Kong replacement draws (尾牆補牌) are also 摸切 targets — record the last
@@ -523,6 +549,7 @@ export class Room implements RoomLike {
 
   /** Advance to the next seat's draw when a discard goes unclaimed. */
   private passTurnAfterUnclaimed(): void {
+    this.pendingPasses.clear();
     const state = this.state;
     if (!state) return;
     const next = ((state.turn + 1) % 4) as Seat;
@@ -772,6 +799,7 @@ export class Room implements RoomLike {
     if (this.status !== "playing" || !this.state) return;
     const state = this.state;
     if (state.phase !== "reaction") return;
+    this.pendingPasses.clear();
     this.autoplayLog.push({
       seat: state.turn as Seat,
       action: "pass",
@@ -795,10 +823,14 @@ export class Room implements RoomLike {
     }
     if (state.phase === "reaction") {
       const pending = collectPendingKinds(state);
-      const allPendingOffline = [...pending.keys()].every(
-        (s) => !this.players[s]?.connected,
-      );
-      if (pending.size > 0 && allPendingOffline) this.onReactionTimeout();
+      if (pending.has(seat)) {
+        this.doPass(seat);
+      } else {
+        const allPendingOffline = [...pending.keys()].every(
+          (s) => !this.players[s]?.connected,
+        );
+        if (pending.size > 0 && allPendingOffline) this.onReactionTimeout();
+      }
     }
   }
 

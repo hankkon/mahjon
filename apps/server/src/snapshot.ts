@@ -274,10 +274,20 @@ function computeHint(state: GameState, seat: number): ReactionHint | null {
 /** Build the Client-Safe snapshot as seen from `seat`. */
 export function buildClientSnapshot(room: RoomLike, seat: number): ClientSnapshot {
   const state = room.state;
+
+  // Pre-map public per-player wire formats (flowers, melds) to avoid redundant allocations
+  const playerPublicWires = room.players.map((p, i) => {
+    const flowers = state && p ? state.wall.flowers[i] : undefined;
+    return {
+      flowers: flowers ? flowers.map((t) => tileToId(t.tile)) : [],
+      melds: state && p ? (state.melds[i] as Meld[]).map(wireMeld) : [],
+    };
+  });
+
   const players: PlayerView[] = room.players.map((p, i) => {
     const isYou = i === seat;
+    const pub = playerPublicWires[i]!;
     const hand = state && p ? state.wall.hands[i] : undefined;
-    const flowers = state && p ? state.wall.flowers[i] : undefined;
     return {
       seat: i,
       playerId: p ? p.playerId : null,
@@ -290,8 +300,8 @@ export function buildClientSnapshot(room: RoomLike, seat: number): ClientSnapsho
         isYou && hand
           ? hand.map((t) => ({ instanceId: t.instanceId, id: tileToId(t.tile) }))
           : null,
-      flowers: flowers ? flowers.map((t) => tileToId(t.tile)) : [],
-      melds: state && p ? (state.melds[i] as Meld[]).map(wireMeld) : [],
+      flowers: pub.flowers,
+      melds: pub.melds,
     };
   });
 

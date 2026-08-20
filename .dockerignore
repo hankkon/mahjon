@@ -9,8 +9,10 @@ dist
 coverage
 *.log
 
-# Godot client (not needed to build the server image)
-apps/player-client
+# Godot client (allow export/web for Web serving)
+apps/player-client/*
+!apps/player-client/export
+!apps/player-client/export/web
 .godot
 
 # Runtime/deploy data (certs, ACME challenge) — mounted via volumes, never baked in

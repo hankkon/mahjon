@@ -1,0 +1,63 @@
+# AI 自主迭代紀錄 (AI Iteration Log)
+
+- **執行日期**：2026-08-20
+- **工作範圍**：低風險穩定性、模組可維護性、Godot 客戶端 UI 品質提升
+
+---
+
+## 輪次 1：`table.gd` 冗餘手牌代碼清理與 View 委派收斂
+
+- **問題**：
+  先前將手牌渲染邏輯抽換至 `HandView.gd` 後，`table.gd` 仍殘留約 130 行未使用的手牌操作舊函式（`_render_draw_spacer`、`_rebuild_hand_sync`、`_apply_playability_all`、`_animate_hand_reflow`），造成維護混淆與潛在代碼漂移風險。
+- **修改檔案**：
+  - `apps/player-client/scripts/table.gd`
+- **修改內容**：
+  - 移除 `table.gd` 內冗餘的手牌建構與理牌動畫舊函式。
+  - 保留 `_create_tile_button`、`_apply_tile_extras`、`_sorted_hand` 與 `_split_drawn_tile` 作為 View 與 QA 測試相容轉發介面。
+- **驗證結果**：
+  - `pnpm test`：163/163 PASS
+  - `pnpm typecheck`：Done（零型別錯誤）
+  - Godot Headless：58/58 PASS
+- **未解風險**：無。
+
+---
+
+## 輪次 2：四家副露中文標籤與連莊標記視覺品質提升
+
+- **問題**：
+  `SeatPanelsView.gd` 渲染各家副露時原先顯示英文鍵值（`[chi]`、`[peng]`、`[kong]`），且座位標籤只顯示單純 `[莊]`，未在座位面板直接標示目前連莊次數。
+- **修改檔案**：
+  - `apps/player-client/scripts/ui/SeatPanelsView.gd`
+- **修改內容**：
+  - 新增 `MELD_CN` 映射字典，將副露類型本地化為 `[吃]`、`[碰]`、`[槓]`、`[暗槓]`、`[補槓]`。
+  - 當莊家連莊數 > 0 時，座位標籤以 `[莊·連%d]` 格式清晰標註。
+- **驗證結果**：
+  - `pnpm test`：163/163 PASS
+  - `pnpm typecheck`：Done（零型別錯誤）
+  - Godot Headless：58/58 PASS
+- **未解風險**：無。
+
+---
+
+## 輪次 3：棄牌河高亮邏輯封裝至 `RiverView.gd` 與色彩殘留防禦
+
+- **問題**：
+  `_highlight_discard_matches` 原直接在 `table.gd` 遍歷所有河槽並手動修改 `modulate` 色彩；且在河槽刷新（`refresh`）或隱藏（`hide_all`）時，若槽位未重置 `modulate`，可能在次局殘留前一手選牌的染色。
+- **修改檔案**：
+  - `apps/player-client/scripts/ui/RiverView.gd`
+  - `apps/player-client/scripts/table.gd`
+- **修改內容**：
+  - 在 `RiverView.gd` 新增 `highlight_matches(selected_tile_id: String)`，將高亮染色的職責內聚於 RiverView。
+  - 在 `RiverView.gd` 的 `refresh()` 與 `hide_all()` 補充 `tr.modulate = Color(1.0, 1.0, 1.0, 1.0)` 重置邏輯。
+  - `table.gd` 的 `_highlight_discard_matches` 委派給 `river_view.highlight_matches`。
+- **驗證結果**：
+  - `pnpm test`：163/163 PASS
+  - `pnpm typecheck`：Done（零型別錯誤）
+  - Godot Headless：58/58 PASS
+- **未解風險**：無。
+
+---
+
+## 總結
+
+3 輪低風險改善皆完成並驗證通過。所有單元測試（163 項）與 Godot headless 渲染測試（58 項）保持 100% 綠燈，未改動任何後端權威邏輯、通訊協議或計分規則。

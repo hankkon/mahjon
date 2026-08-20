@@ -26,7 +26,7 @@ signal snapshot_received(snapshot: Dictionary)
 signal error_received(code: String, message: String, operation_id: String)
 signal pong_received(latency_ms: int)
 
-const DEFAULT_URL := "ws://localhost:3000/ws"
+const DEFAULT_URL := "wss://taiwan-mahjong-server-production.up.railway.app/ws"
 const PROTOCOL_VERSION := "1.0.0"
 
 ## 連線參數

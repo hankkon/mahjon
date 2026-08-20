@@ -102,6 +102,7 @@ function serveStatic(webRoot: string, reqUrl: string, res: ServerResponse): void
 export async function startServer(config: ServerConfig = {}): Promise<RunningServer> {
   const { port = 3000, host = "0.0.0.0", variant = "north", timeoutMs, webRoot, enableAi = false } = config;
 
+  const startedAt = new Date().toISOString();
   const manager = new RoomManager({ roomOptions: { variant, timeoutMs } });
   const httpServer = createServer((req, res) => {
     if (req.url === "/health" || req.url === "/healthz") {
@@ -114,6 +115,9 @@ export async function startServer(config: ServerConfig = {}): Promise<RunningSer
           name: SERVER_NAME,
           protocol: PROTOCOL_VERSION,
           ok: true,
+          startedAt,
+          uptimeSec: Math.floor(process.uptime()),
+          pid: process.pid,
           memory: { rss: mem.rss, heapUsed: mem.heapUsed, heapTotal: mem.heapTotal, external: mem.external },
           sockets: games.socketCount,
           rooms: manager.rooms.size,

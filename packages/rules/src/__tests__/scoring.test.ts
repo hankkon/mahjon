@@ -625,4 +625,43 @@ describe("settleMultiLedger — 一砲多響零和", () => {
     // seat3 放槍者付全額 = -75 -25 = -100
     expect(ledger.reduce((acc, e) => acc + e.delta, 0)).toBe(0);
   });
+
+  it("GC-42 放槍者也是胡家之一（退化 case）：仍嚴格零和", () => {
+    // 場景：seat 0 放槍，同時 seat 0 和 seat 1 都胡牌（罕見但規則允許）。
+    // seat0 作為胡家不向自己收錢；seat1 作為胡家收 seat2/3 半額。
+    // sum(delta) 必須 === 0。
+    const c0 = ctx({
+      winner: 0,
+      hand: tiles(...ALL_TRIPLETS_HAND), // 4 fan
+      discardWin: true,
+      discardWinSeat: 0, // 放槍者 = 胡家
+    });
+    const c1 = ctx({
+      winner: 1,
+      hand: tiles(...RUNS_HAND), // 1 fan
+      discardWin: true,
+      discardWinSeat: 0, // 同一放槍者
+    });
+    const ledger = settleMultiLedger([c0, c1]);
+    const sum = ledger.reduce((acc, e) => acc + e.delta, 0);
+    expect(sum).toBe(0);
+    // seat0 (放槍者兼胡家) 仍應是正或零（不會被自己扣錢）。
+    expect(ledger.find((e) => e.seat === 0)!.delta).toBeGreaterThanOrEqual(0);
+  });
+
+  it("GC-43 單胡家 settleMultiLedger 與 settleLedger 結果相同", () => {
+    const c = ctx({
+      winner: 1,
+      hand: tiles(...ALL_TRIPLETS_HAND),
+      discardWin: true,
+      discardWinSeat: 3,
+    });
+    const multi = settleMultiLedger([c]);
+    const single = settleLedger(c);
+    for (let seat = 0; seat < 4; seat++) {
+      expect(multi.find((e) => e.seat === seat)!.delta).toBe(
+        single.find((e) => e.seat === seat)!.delta,
+      );
+    }
+  });
 });

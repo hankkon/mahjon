@@ -90,7 +90,8 @@ func _on_reconnect_failed() -> void:
 
 
 func _on_room_created(room_id: String) -> void:
-	status_label.text = "已開房：%s （等待其他玩家加入…）" % room_id
+	status_label.text = "已開房：%s （準備中…）" % room_id
+	NetworkManager.mark_ready()
 
 
 func _on_player_joined(player_id: String, seat: int) -> void:
@@ -109,13 +110,15 @@ func _on_snapshot(_snapshot: Dictionary) -> void:
 
 ## 切換到牌桌場景（若已在大廳則不重複切換）。
 func _enter_table() -> void:
-	# 快照可能在場景樹尚未就緒（current_scene 為 null）時到達，需防呆。
-	if get_tree() == null:
+	# 快照可能在場景樹尚未就緒、或本節點已被移出樹（競態）時到達，
+	# 此時 get_tree() 內部會讀到 null 而炸。用 is_inside_tree() 判斷最安全。
+	if not is_inside_tree():
 		return
-	var current := get_tree().current_scene
+	var tree := get_tree()
+	var current := tree.current_scene
 	if current != null and current.name == "Table":
 		return
-	get_tree().change_scene_to_file("res://scenes/Table.tscn")
+	tree.change_scene_to_file("res://scenes/Table.tscn")
 
 
 func _on_error(code: String, message: String, _operation_id: String) -> void:

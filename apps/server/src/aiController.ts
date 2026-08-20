@@ -20,7 +20,7 @@
 
 import type { RoomManager } from "./roomManager.js";
 import type { GameServer } from "./wss.js";
-import { AI_ACTION_DELAY_MS, decideDiscard, decideReaction, DIFFICULTY_NAMES, isAiPlayerId, shouldReady, type AiDifficulty } from "./aiPlayer.js";
+import { AI_ACTION_DELAY_MS, AI_REACTION_DELAY_MS, decideDiscard, decideReaction, DIFFICULTY_NAMES, isAiPlayerId, shouldReady, type AiDifficulty } from "./aiPlayer.js";
 import type { Room } from "./room.js";
 
 export interface AiControllerOptions {
@@ -42,6 +42,8 @@ export class AiController {
   private readonly opCounter = new Map<string, number>();
   /** playerId → per-AI move throttling (so moves don't look instant). */
   private readonly nextActAt = new Map<string, number>();
+  /** roomId:playerId → last reaction window generationId seen. */
+  private readonly lastReactionGen = new Map<string, number>();
   private timer: NodeJS.Timeout | null = null;
   private readonly difficultyForPlayer = new Map<string, AiDifficulty>();
 
@@ -86,7 +88,8 @@ export class AiController {
   // Main tick
   // -------------------------------------------------------------------------
 
-  private tick(): void {
+  /** Execute a single scan tick (public for testing and deterministic ticks). */
+  tick(): void {
     for (const room of this.manager.rooms.values()) {
       this.ensureAis(room);
       this.act(room);
@@ -170,7 +173,9 @@ export class AiController {
         // Only seats with a pending reaction kind act (else pass / skip).
         const decision = decideReaction(room, seat, difficulty);
         if (!decision) continue;
-        if (!this.throttle(p.playerId, difficulty)) continue;
+        // Reaction uses a longer deliberate delay so a solo human can read the
+        // 吃/碰/槓/過 hint before the AI claims/passes it away.
+        if (!this.reactionThrottle(room.id, p.playerId, room.generationId)) continue;
         if (decision.action === "pass") {
           this.sendCommand(room, p.playerId, {
             type: "pass",
@@ -198,6 +203,22 @@ export class AiController {
     if (now < at) return false;
     const [min, max] = AI_ACTION_DELAY_MS[difficulty];
     this.nextActAt.set(playerId, now + min + Math.random() * (max - min));
+    return true;
+  }
+
+  /** Longer reaction-window throttle so a solo human isn't instantly raced. */
+  private reactionThrottle(roomId: string, playerId: string, generationId: number): boolean {
+    const key = `${roomId}:${playerId}`;
+    const now = Date.now();
+    if (this.lastReactionGen.get(key) !== generationId) {
+      // First time seeing this reaction window generation for this AI seat!
+      this.lastReactionGen.set(key, generationId);
+      const [min, max] = AI_REACTION_DELAY_MS;
+      this.nextActAt.set(playerId, now + min + Math.random() * (max - min));
+      return false;
+    }
+    const at = this.nextActAt.get(playerId) ?? 0;
+    if (now < at) return false;
     return true;
   }
 

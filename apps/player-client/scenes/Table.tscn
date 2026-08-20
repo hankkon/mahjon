@@ -1,6 +1,8 @@
 [gd_scene load_steps=16 format=3]
 
 [ext_resource type="Script" path="res://scripts/table.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/ui/RiverView.gd" id="2"]
+[ext_resource type="Script" path="res://scripts/ui/SettlementView.gd" id="3"]
 
 [sub_resource type="StyleBoxFlat" id="glass_panel"]
 content_margin_left = 12.0
@@ -205,22 +207,42 @@ corner_radius_bottom_right = 10
 corner_radius_bottom_left = 10
 
 [sub_resource type="StyleBoxFlat" id="felt_table"]
-content_margin_left = 24.0
-content_margin_top = 20.0
-content_margin_right = 24.0
-content_margin_bottom = 20.0
-bg_color = Color(0.043, 0.157, 0.106, 1)
-border_width_left = 3
-border_width_top = 3
-border_width_right = 3
-border_width_bottom = 3
-border_color = Color(0.831, 0.686, 0.216, 0.55)
-corner_radius_top_left = 24
-corner_radius_top_right = 24
-corner_radius_bottom_right = 24
-corner_radius_bottom_left = 24
-shadow_color = Color(0, 0, 0, 0.55)
-shadow_size = 24
+content_margin_left = 26.0
+content_margin_top = 22.0
+content_margin_right = 26.0
+content_margin_bottom = 22.0
+bg_color = Color(0.035, 0.13, 0.092, 1)
+border_width_left = 4
+border_width_top = 4
+border_width_right = 4
+border_width_bottom = 4
+border_color = Color(0.67, 0.5, 0.16, 0.75)
+corner_radius_top_left = 28
+corner_radius_top_right = 28
+corner_radius_bottom_right = 28
+corner_radius_bottom_left = 28
+shadow_color = Color(0, 0, 0, 0.65)
+shadow_size = 30
+shadow_offset = Vector2(0, 5)
+
+[sub_resource type="StyleBoxFlat" id="rim_table"]
+content_margin_left = 40.0
+content_margin_top = 36.0
+content_margin_right = 40.0
+content_margin_bottom = 36.0
+bg_color = Color(0.16, 0.09, 0.045, 1)
+border_width_left = 6
+border_width_top = 6
+border_width_right = 6
+border_width_bottom = 6
+border_color = Color(0.82, 0.65, 0.28, 0.9)
+corner_radius_top_left = 44
+corner_radius_top_right = 44
+corner_radius_bottom_right = 44
+corner_radius_bottom_left = 44
+shadow_color = Color(0, 0, 0, 0.8)
+shadow_size = 42
+shadow_offset = Vector2(0, 8)
 
 [node name="Table" type="Control"]
 layout_mode = 3
@@ -244,6 +266,27 @@ anchor_bottom = 1.0
 texture = SubResource("vig_tex")
 stretch_mode = 0
 mouse_filter = 2
+
+[node name="RiverView" type="Node" parent="."]
+script = ExtResource("2")
+
+[node name="SettlementView" type="Node" parent="."]
+script = ExtResource("3")
+
+[node name="TableRim" type="Panel" parent="."]
+layout_mode = 1
+anchors_preset = -1
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -440.0
+offset_top = -280.0
+offset_right = 440.0
+offset_bottom = 280.0
+z_index = 0
+mouse_filter = 2
+theme_override_styles/panel = SubResource("rim_table")
 
 [node name="TableCenter" type="Panel" parent="."]
 unique_name_in_owner = true

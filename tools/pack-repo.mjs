@@ -90,6 +90,8 @@ const FILES = [
   "apps/player-client/qa_render_check.tscn",
   // —— docs / tools / nginx ——
   "docs/GROK_UI_OVERHAUL_PROMPT.md",
+  "docs/HARD_FIX_REPORT.md",
+  "docs/OVERNIGHT_REPORT.md",
   "docs/qa-e2e-report.md",
   "docs/qa-polish-report.md",
   "docs/spec.md",
@@ -109,7 +111,7 @@ function collectTree(dir, prefix = "") {
     const rel = prefix + name;
     const st = statSync(full);
     if (st.isDirectory()) {
-      if (["node_modules", "dist", ".git", "export", "assets", "data"].includes(name)) continue;
+      if (["node_modules", "dist", ".git", "export", "assets", "data", ".godot", "shader_cache", ".import"].includes(name)) continue;
       out.push(`${rel}/`);
       out.push(...collectTree(full, `${rel}/`));
     } else {
