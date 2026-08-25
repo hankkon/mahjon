@@ -19,8 +19,15 @@
  * room.handleCommand(). No socket / protocol imports here.
  */
 
-import type { GameState, Meld, TileInstance } from "@taiwan-mahjong/rules";
-import { chiOptions, detectWin, kongOptions, pengOptions, tileToId } from "@taiwan-mahjong/rules";
+import type { GameState, Meld, TileInstance, ChiMeld, PengMeld } from "@taiwan-mahjong/rules";
+import {
+  chiOptions,
+  detectWin,
+  kongOptions,
+  pengOptions,
+  tileToId,
+  deckRemaining,
+} from "@taiwan-mahjong/rules";
 import type { Room } from "./room.js";
 import { collectPendingKinds } from "./gameLoop.js";
 
@@ -52,6 +59,26 @@ export const AI_REACTION_DELAY_MS: [number, number] = [1500, 2600];
 
 const NUM_SUITS = ["wan", "tiao", "tong"] as const;
 const HONOR_RANKS = ["dong", "nan", "xi", "bei", "zhong", "fa", "bai"] as const;
+
+export const ALL_TILE_IDS: string[] = (() => {
+  const ids: string[] = [];
+  for (const suit of NUM_SUITS) {
+    for (let rank = 1; rank <= 9; rank++) ids.push(`${suit}:${rank}`);
+  }
+  for (const honor of HONOR_RANKS) ids.push(`honor:${honor}`);
+  return ids;
+})();
+
+export function fakeTile(id: string): TileInstance {
+  const [category, value] = id.split(":");
+  if (category === "honor") {
+    return { tile: { kind: "honor", honor: value as "dong" }, instanceId: -1 };
+  }
+  return {
+    tile: { kind: "numbered", suit: category as "wan", rank: Number(value) as 1 },
+    instanceId: -1,
+  };
+}
 
 function idSuitRank(id: string): { suit: string; rank: number } | null {
   const [cat, val] = id.split(":");
@@ -142,51 +169,222 @@ function pickSabotageTile(hand: readonly TileInstance[]): TileInstance | undefin
 }
 
 // ---------------------------------------------------------------------------
-// Tenpai (聽牌) evaluation — the hard AI's discard core
+// Shanten (向聽數) & Tile Efficiency (牌效) Engine — Taiwan 16-Tile Mahjong
 // ---------------------------------------------------------------------------
 
-/** All 34 tile identities (27 numbered + 7 honors) — the tenpai wait space. */
-const ALL_TILE_IDS: string[] = (() => {
-  const ids: string[] = [];
-  for (const suit of NUM_SUITS) {
-    for (let rank = 1; rank <= 9; rank++) ids.push(`${suit}:${rank}`);
-  }
-  for (const honor of HONOR_RANKS) ids.push(`honor:${honor}`);
-  return ids;
-})();
+/**
+ * Fast Shanten (向聽數) Calculator for Taiwan 16-tile Mahjong:
+ * Target: 5 melds + 1 pair = 16 (or 17 on winning hand).
+ * -1 = Complete (Win)
+ *  0 = Tenpai (聽牌)
+ *  1 = 1-Shanten (一向聽), etc.
+ */
+export function calculateShanten(
+  hand: readonly TileInstance[],
+  melds: readonly Meld[] = [],
+): number {
+  const counts = handCounts(hand);
+  const openMeldCount = melds.length;
+  const targetMelds = 5 - openMeldCount;
 
-/** A bare TileInstance for a tile identity (instanceId unused for detection). */
-function fakeTile(id: string): TileInstance {
-  const [category, value] = id.split(":");
-  if (category === "honor") {
-    return { tile: { kind: "honor", honor: value as "dong" }, instanceId: -1 };
+  // 1. Eight Pairs (八對半 / 嚦咕嚦咕) Shanten (only if purely concealed)
+  let eightPairShanten = Number.POSITIVE_INFINITY;
+  if (openMeldCount === 0) {
+    let pairCount = 0;
+    for (const c of counts.values()) {
+      if (c >= 4) pairCount += 2;
+      else if (c >= 2) pairCount += 1;
+    }
+    eightPairShanten = Math.max(0, 8 - pairCount);
   }
-  return { tile: { kind: "numbered", suit: category as "wan", rank: Number(value) as 1 }, instanceId: -1 };
-}
 
-function isTenpai(hand: readonly TileInstance[], melds: readonly Meld[]): boolean {
-  for (let i = 0; i < hand.length; i++) {
-    const rest = hand.filter((_, idx) => idx !== i);
-    for (const id of ALL_TILE_IDS) {
-      if (detectWin([...rest, fakeTile(id)], melds).win) return true;
+  // 2. Standard 5-melds + 1-pair Shanten
+  const suitCounts: Record<string, number[]> = {
+    wan: new Array(10).fill(0),
+    tiao: new Array(10).fill(0),
+    tong: new Array(10).fill(0),
+  };
+  const honorCounts: number[] = new Array(7).fill(0);
+
+  for (const [id, count] of counts) {
+    const sr = idSuitRank(id);
+    if (!sr) continue;
+    if (sr.suit === "honor") {
+      honorCounts[sr.rank] = count;
+    } else {
+      suitCounts[sr.suit]![sr.rank] = count;
     }
   }
-  return false;
-}
 
-/** Number of distinct wait tiles that make `hand` a win (0 = not tenpai). */
-function waitCount(hand: readonly TileInstance[], melds: readonly Meld[]): number {
-  let count = 0;
-  for (let i = 0; i < hand.length; i++) {
-    const rest = hand.filter((_, idx) => idx !== i);
-    for (const id of ALL_TILE_IDS) {
-      if (detectWin([...rest, fakeTile(id)], melds).win) {
-        count++;
-        break; // one wait identity per discarded tile
+  // Count honors
+  let honorMelds = 0;
+  let honorPairs = 0;
+  for (const c of honorCounts) {
+    if (c >= 3) honorMelds += 1;
+    else if (c === 2) honorPairs += 1;
+  }
+
+  // Decompose numbered suit into candidate melds & partial melds
+  function decomposeSuit(arr: number[]): Array<{ melds: number; taatsu: number; pairs: number }> {
+    const results: Array<{ melds: number; taatsu: number; pairs: number }> = [];
+
+    function search(idx: number, m: number, t: number, p: number, currentArr: number[]) {
+      if (idx > 9) {
+        results.push({ melds: m, taatsu: t, pairs: p });
+        return;
+      }
+      if (currentArr[idx] === 0) {
+        search(idx + 1, m, t, p, currentArr);
+        return;
+      }
+
+      // Triplet
+      if (currentArr[idx]! >= 3) {
+        currentArr[idx]! -= 3;
+        search(idx, m + 1, t, p, currentArr);
+        currentArr[idx]! += 3;
+      }
+
+      // Run (idx, idx+1, idx+2)
+      if (idx <= 7 && currentArr[idx]! >= 1 && currentArr[idx + 1]! >= 1 && currentArr[idx + 2]! >= 1) {
+        currentArr[idx]! -= 1;
+        currentArr[idx + 1]! -= 1;
+        currentArr[idx + 2]! -= 1;
+        search(idx, m + 1, t, p, currentArr);
+        currentArr[idx]! += 1;
+        currentArr[idx + 1]! += 1;
+        currentArr[idx + 2]! += 1;
+      }
+
+      // Pair
+      if (currentArr[idx]! >= 2) {
+        currentArr[idx]! -= 2;
+        search(idx, m, t, p + 1, currentArr);
+        currentArr[idx]! += 2;
+      }
+
+      // Two-sided / edge run (idx, idx+1)
+      if (idx <= 8 && currentArr[idx]! >= 1 && currentArr[idx + 1]! >= 1) {
+        currentArr[idx]! -= 1;
+        currentArr[idx + 1]! -= 1;
+        search(idx, m, t + 1, p, currentArr);
+        currentArr[idx]! += 1;
+        currentArr[idx + 1]! += 1;
+      }
+
+      // Inside run (idx, idx+2)
+      if (idx <= 7 && currentArr[idx]! >= 1 && currentArr[idx + 2]! >= 1) {
+        currentArr[idx]! -= 1;
+        currentArr[idx + 2]! -= 1;
+        search(idx, m, t + 1, p, currentArr);
+        currentArr[idx]! += 1;
+        currentArr[idx + 2]! += 1;
+      }
+
+      // Skip tile as isolated
+      search(idx + 1, m, t, p, currentArr);
+    }
+
+    search(1, 0, 0, 0, [...arr]);
+    return results;
+  }
+
+  const wanCombos = decomposeSuit(suitCounts.wan!);
+  const tiaoCombos = decomposeSuit(suitCounts.tiao!);
+  const tongCombos = decomposeSuit(suitCounts.tong!);
+
+  let minStandardShanten = 10;
+
+  for (const w of wanCombos) {
+    for (const ti of tiaoCombos) {
+      for (const to of tongCombos) {
+        const totalMelds = honorMelds + w.melds + ti.melds + to.melds;
+        const totalPairs = honorPairs + w.pairs + ti.pairs + to.pairs;
+        const totalTaatsu = w.taatsu + ti.taatsu + to.taatsu;
+
+        // With pair as head (雀頭)
+        if (totalPairs > 0) {
+          const usedMelds = Math.min(targetMelds, totalMelds);
+          const remMeldsNeeded = targetMelds - usedMelds;
+          const availableTaatsu = totalTaatsu + (totalPairs - 1);
+          const usedTaatsu = Math.min(remMeldsNeeded, availableTaatsu);
+          const shanten = (targetMelds - usedMelds) * 2 - usedTaatsu - 1;
+          if (shanten < minStandardShanten) minStandardShanten = shanten;
+        }
+
+        // Without pair as head
+        const usedMelds = Math.min(targetMelds, totalMelds);
+        const remMeldsNeeded = targetMelds - usedMelds;
+        const availableTaatsu = totalTaatsu + totalPairs;
+        const usedTaatsu = Math.min(remMeldsNeeded, availableTaatsu);
+        const shanten = (targetMelds - usedMelds) * 2 - usedTaatsu;
+        if (shanten < minStandardShanten) minStandardShanten = shanten;
       }
     }
   }
-  return count;
+
+  return Math.min(minStandardShanten, eightPairShanten);
+}
+
+function countUnseen(
+  tid: string,
+  hand: readonly TileInstance[],
+  melds: readonly Meld[],
+  discards: readonly TileInstance[],
+): number {
+  let seen = 0;
+  for (const t of hand) {
+    if (tileToId(t.tile) === tid) seen++;
+  }
+  for (const m of melds) {
+    for (const t of m.tiles) {
+      if (tileToId(t.tile) === tid) seen++;
+    }
+  }
+  for (const t of discards) {
+    if (tileToId(t.tile) === tid) seen++;
+  }
+  return Math.max(0, 4 - seen);
+}
+
+/**
+ * Calculate Tile Acceptance (進張數 / Ukeire):
+ * Given a hand, count how many unrevealed tiles improve the Shanten, and sum their copies.
+ */
+export function calculateTileAcceptance(
+  hand: readonly TileInstance[],
+  melds: readonly Meld[] = [],
+  visibleDiscards: readonly TileInstance[] = [],
+): { shanten: number; acceptance: number; improvingTiles: string[] } {
+  const currentShanten = calculateShanten(hand, melds);
+  if (currentShanten <= 0) {
+    // Tenpai (0) or Win (-1): evaluate winning wait tiles
+    let waitCopies = 0;
+    const improving: string[] = [];
+    for (const tid of ALL_TILE_IDS) {
+      const simulatedHand = [...hand, fakeTile(tid)];
+      if (detectWin(simulatedHand, melds).win) {
+        improving.push(tid);
+        waitCopies += countUnseen(tid, hand, melds, visibleDiscards);
+      }
+    }
+    return { shanten: currentShanten, acceptance: waitCopies, improvingTiles: improving };
+  }
+
+  let totalAcceptance = 0;
+  const improving: string[] = [];
+
+  for (const tid of ALL_TILE_IDS) {
+    const simulatedHand = [...hand, fakeTile(tid)];
+    const newShanten = calculateShanten(simulatedHand, melds);
+    if (newShanten < currentShanten) {
+      improving.push(tid);
+      const remaining = countUnseen(tid, hand, melds, visibleDiscards);
+      totalAcceptance += remaining;
+    }
+  }
+
+  return { shanten: currentShanten, acceptance: totalAcceptance, improvingTiles: improving };
 }
 
 // ---------------------------------------------------------------------------
@@ -199,8 +397,7 @@ export interface DiscardDecision {
 }
 
 /**
- * Decide which tile to discard for the given difficulty.
- * `hand` must contain the tile to be discarded (the AI reads it from state).
+ * Decide which tile to discard for the given difficulty using Tile Efficiency.
  */
 export function decideDiscard(
   room: Room,
@@ -211,42 +408,85 @@ export function decideDiscard(
   if (!state || state.phase !== "discard" || state.turn !== seat) return null;
   const hand = state.wall.hands[seat];
   if (!hand || hand.length === 0) return null;
-  const melds = state.melds[seat] as Meld[];
+  const melds = (state.melds[seat] as Meld[]) ?? [];
+
+  // Collect visible discards for defensive and acceptance accuracy
+  const allDiscards: TileInstance[] = [];
+  for (const dList of state.discards) {
+    if (Array.isArray(dList)) allDiscards.push(...dList);
+  }
 
   let target: TileInstance | undefined;
 
   if (difficulty === "easy") {
-    // 初級: 70% random, 30% lowest-value (keeps it beatable but not braindead).
-    if (Math.random() < 0.7) target = pickRandom(hand);
-    else target = pickWinDiscard(hand);
+    // 初級: 40% random, 60% lowest-value heuristic
+    if (Math.random() < 0.4) {
+      target = pickRandom(hand);
+    } else {
+      target = pickWinDiscard(hand);
+    }
   } else if (difficulty === "medium") {
-    // 中級: tile-value based — discard the lowest-value tile; occasionally
-    // risk a random discard so it stays human.
-    target = pickWinDiscard(hand);
-    if (Math.random() < 0.12 && hand.length > 1) target = pickRandom(hand);
-  } else {
-    // 高級: tenpai-aware. Try every discard; prefer one that immediately
-    // tenpais with the most waits. Otherwise keep the highest tenpai progress.
+    // 中級: Discard tile that maximizes remaining acceptance
     let best: TileInstance | undefined;
-    let bestWaits = -1;
-    let bestFallbackScore = Number.NEGATIVE_INFINITY;
+    let bestShanten = Number.POSITIVE_INFINITY;
+    let bestAcceptance = -1;
+
     for (const candidate of hand) {
       const rest = hand.filter((t) => t.instanceId !== candidate.instanceId);
-      const waits = waitCount(rest, melds);
-      if (waits > bestWaits) {
-        bestWaits = waits;
+      const ukeire = calculateTileAcceptance(rest, melds, allDiscards);
+      if (
+        ukeire.shanten < bestShanten ||
+        (ukeire.shanten === bestShanten && ukeire.acceptance > bestAcceptance)
+      ) {
+        bestShanten = ukeire.shanten;
+        bestAcceptance = ukeire.acceptance;
         best = candidate;
-        bestFallbackScore = -tileValue(tileToId(candidate.tile), handCounts(rest));
-      } else if (waits === bestWaits) {
-        // Tie: prefer discarding the least valuable tile (keep strong shapes).
-        const score = -tileValue(tileToId(candidate.tile), handCounts(rest));
-        if (score > bestFallbackScore) {
-          bestFallbackScore = score;
-          best = candidate;
-        }
       }
     }
-    target = best;
+    // Occasional human jitter (8%)
+    if (Math.random() < 0.08 && hand.length > 1) target = pickRandom(hand);
+    else target = best ?? pickWinDiscard(hand);
+  } else {
+    // 高級: Full Shanten + Tile Efficiency + Shape Tie-breaker + Defensive Awareness
+    let best: TileInstance | undefined;
+    let bestShanten = Number.POSITIVE_INFINITY;
+    let bestAcceptance = -1;
+    let bestTieScore = Number.NEGATIVE_INFINITY;
+
+    const remainingWall = deckRemaining(state.wall);
+    const isLateGame = remainingWall <= 24;
+
+    for (const candidate of hand) {
+      const rest = hand.filter((t) => t.instanceId !== candidate.instanceId);
+      const ukeire = calculateTileAcceptance(rest, melds, allDiscards);
+
+      // Tie-breaker: tile shape score + defense score
+      const cid = tileToId(candidate.tile);
+      const shapeScore = -tileValue(cid, handCounts(rest));
+      let defenseScore = 0;
+      if (isLateGame) {
+        // Discarding a tile that's already seen in discards is safe
+        const timesSeen = allDiscards.filter((d) => tileToId(d.tile) === cid).length;
+        defenseScore = timesSeen * 2;
+      }
+
+      const totalTieScore = shapeScore + defenseScore;
+
+      if (
+        ukeire.shanten < bestShanten ||
+        (ukeire.shanten === bestShanten && ukeire.acceptance > bestAcceptance) ||
+        (ukeire.shanten === bestShanten &&
+          ukeire.acceptance === bestAcceptance &&
+          totalTieScore > bestTieScore)
+      ) {
+        bestShanten = ukeire.shanten;
+        bestAcceptance = ukeire.acceptance;
+        bestTieScore = totalTieScore;
+        best = candidate;
+      }
+    }
+
+    target = best ?? pickWinDiscard(hand);
   }
 
   if (!target) return null;
@@ -269,29 +509,9 @@ export interface PassDecision {
   action: "pass";
 }
 
-/** Evaluate how much a claimed meld improves the hand (count pairs / triplets). */
-function meldGain(hand: readonly TileInstance[], ids: readonly number[]): number {
-  const counts = handCounts(hand);
-  let gain = 0;
-  for (const id of ids) {
-    const t = hand.find((h) => h.instanceId === id);
-    if (!t) continue;
-    const tid = tileToId(t.tile);
-    const sr = idSuitRank(tid);
-    if (!sr) continue;
-    if (sr.suit === "honor") gain += 2; // honors only form triplets
-    else {
-      const n = counts.get(tid) ?? 0;
-      gain += n >= 3 ? 3 : n === 2 ? 2 : 1;
-    }
-  }
-  return gain;
-}
-
 /**
- * Decide a reaction (or pass) for the given seat during the reaction window.
- * Also handles self-kong during the player's own discard phase (state.phase
- * === "discard" && state.turn === seat).
+ * Decide a reaction (or pass) for the given seat during the reaction window
+ * using intelligent Shanten & Meld evaluation.
  */
 export function decideReaction(
   room: Room,
@@ -302,12 +522,13 @@ export function decideReaction(
   if (!state || room.status !== "playing") return null;
   const hand = state.wall.hands[seat];
   if (!hand) return null;
+  const melds = (state.melds[seat] as Meld[]) ?? [];
 
   // --- Self kong (closed / add-on) during own discard phase. ---
   if (state.phase === "discard" && state.turn === seat) {
     const kongs = kongOptions(state, seat, false);
     if (kongs.length > 0) {
-      const claimP = difficulty === "hard" ? 0.85 : difficulty === "medium" ? 0.6 : 0.3;
+      const claimP = difficulty === "hard" ? 0.9 : difficulty === "medium" ? 0.7 : 0.4;
       if (Math.random() < claimP) {
         const opt = kongs[0]!;
         return {
@@ -319,25 +540,24 @@ export function decideReaction(
         };
       }
     }
-    return null; // discard turn — no reaction window
+    return null;
   }
 
   // --- Reaction window against the latest discard. ---
   if (state.phase !== "reaction" || state.lastDiscardBy === seat || !state.lastDiscard) {
     return null;
   }
-  // 只有「真的有吃/碰/槓資格」的座位才能表態；沒資格時回 null，不要為了
-  // 「走完整流程」送出 pass——否則會瞬間關掉別人的反應窗（pass 只關自家）。
   const pending = collectPendingKinds(state);
   if (!pending.has(seat)) return null;
 
-  const claimBase: Record<AiDifficulty, number> = { easy: 0.25, medium: 0.55, hard: 0.85 };
+  const currentShanten = calculateShanten(hand, melds);
 
-  // Kong (open) — strongest claim.
+  // 1. Kong (open) — highest priority
   const openKongs = kongOptions(state, seat, true);
   if (openKongs.length > 0) {
     const opt = openKongs[0]!;
-    if (Math.random() < claimBase[difficulty] + 0.1) {
+    const p = difficulty === "hard" ? 0.95 : difficulty === "medium" ? 0.75 : 0.4;
+    if (Math.random() < p) {
       return {
         action: "reaction",
         kind: "kong",
@@ -348,27 +568,79 @@ export function decideReaction(
     }
   }
 
-  // Peng — good when it creates a triplet.
+  // 2. Peng — intelligent check
   const peng = pengOptions(state, seat);
   if (peng) {
-    const gain = meldGain(hand, peng.handTileIds);
-    const p = difficulty === "easy" ? 0.2 : difficulty === "medium" ? 0.45 + gain * 0.1 : 0.65 + gain * 0.08;
-    if (Math.random() < Math.min(0.95, p)) {
+    const claimedTile = state.lastDiscard;
+    const isDragon = claimedTile.tile.kind === "honor" &&
+      ["zhong", "fa", "bai"].includes((claimedTile.tile as { honor: string }).honor);
+    const newHand = hand.filter((t) => !peng.handTileIds.includes(t.instanceId));
+    const newMelds: Meld[] = [
+      ...melds,
+      {
+        id: -1,
+        kind: "peng" as const,
+        tiles: [claimedTile, ...hand.filter((t) => peng.handTileIds.includes(t.instanceId))],
+        claimed: claimedTile,
+      },
+    ];
+    const newShanten = calculateShanten(newHand, newMelds);
+
+    let shouldPeng = false;
+    if (difficulty === "hard") {
+      // Hard: Peng if it improves shanten, or is dragon triplet (fans), or achieves Tenpai
+      shouldPeng = newShanten < currentShanten || isDragon || newShanten === 0;
+    } else if (difficulty === "medium") {
+      shouldPeng = newShanten <= currentShanten;
+    } else {
+      shouldPeng = Math.random() < 0.35;
+    }
+
+    if (shouldPeng) {
       return { action: "reaction", kind: "peng" };
     }
   }
 
-  // Chi — only by 上家; medium/hard take it when the run is strong.
+  // 3. Chi — only for 下家
   const chis = chiOptions(state, seat, state.lastDiscard);
   if (chis && chis.length > 0) {
-    const opt = chis[0]!;
-    const gain = meldGain(hand, [opt.handTiles[0]!.instanceId, opt.handTiles[1]!.instanceId]);
-    const p = difficulty === "easy" ? 0.15 : difficulty === "medium" ? 0.35 + gain * 0.08 : 0.5 + gain * 0.06;
-    if (Math.random() < Math.min(0.9, p)) {
+    // Pick the chi option that gives the lowest shanten and highest acceptance
+    let bestChi: (typeof chis)[0] | null = null;
+    let bestShanten = currentShanten;
+
+    for (const opt of chis) {
+      const ids = [opt.handTiles[0]!.instanceId, opt.handTiles[1]!.instanceId];
+      const newHand = hand.filter((t) => !ids.includes(t.instanceId));
+      const simulatedChiMeld: ChiMeld = {
+        id: -1,
+        kind: "chi",
+        tiles: [opt.handTiles[0]!, opt.handTiles[1]!, state.lastDiscard],
+        claimed: state.lastDiscard,
+        handTiles: [opt.handTiles[0]!, opt.handTiles[1]!],
+      };
+      const newMelds: Meld[] = [...melds, simulatedChiMeld];
+      const s = calculateShanten(newHand, newMelds);
+      if (s < bestShanten) {
+        bestShanten = s;
+        bestChi = opt;
+      }
+    }
+
+    let shouldChi = false;
+    if (difficulty === "hard") {
+      shouldChi = bestChi !== null && (bestShanten < currentShanten || bestShanten === 0);
+    } else if (difficulty === "medium") {
+      shouldChi = bestChi !== null && bestShanten <= currentShanten && Math.random() < 0.7;
+    } else {
+      shouldChi = Math.random() < 0.25;
+      if (shouldChi) bestChi = chis[0]!;
+    }
+
+    if (shouldChi && bestChi) {
       return {
         action: "reaction",
         kind: "chi",
-        handTileIds: [opt.handTiles[0]!.instanceId, opt.handTiles[1]!.instanceId],
+        handTileIds: [bestChi.handTiles[0]!.instanceId, bestChi.handTiles[1]!.instanceId],
       };
     }
   }

@@ -10,20 +10,37 @@
  */
 
 import { startServer, SERVER_NAME, PROTOCOL_VERSION } from "./index.js";
+import { loadServerConfig } from "./config.js";
 
-const port = Number(process.env.PORT ?? 3000);
-const variant = (process.env.VARIANT === "south" ? "south" : "north") as "north" | "south";
-const timeoutMs = Number(process.env.TIMEOUT_MS ?? 15_000);
+const config = loadServerConfig(process.env, false);
 
-const enableAi = process.env.ENABLE_AI === "true" || process.env.ENABLE_AI === "1";
+const server = await startServer({
+  port: config.port,
+  host: config.host,
+  variant: config.variant,
+  timeoutMs: config.timeoutMs,
+  enableAi: config.enableAi,
+  sqlitePath: config.sqlitePath,
+  seatCredentialSecret: config.seatCredentialSecret,
+});
 
-const server = await startServer({ port, host: "0.0.0.0", variant, timeoutMs, enableAi });
-
-console.log(`[${SERVER_NAME}] protocol v${PROTOCOL_VERSION} variant=${variant}`);
-console.log(`[${SERVER_NAME}] thinking-timeout=${timeoutMs}ms`);
-console.log(`[${SERVER_NAME}] listening on http://0.0.0.0:${server.port}`);
+console.log(`[${SERVER_NAME}] protocol v${PROTOCOL_VERSION} variant=${config.variant}`);
+console.log(`[${SERVER_NAME}] thinking-timeout=${config.timeoutMs}ms`);
+if (config.sqlitePath) console.log(`[${SERVER_NAME}] persistence=sqlite path=${config.sqlitePath}`);
+if (config.seatCredentialSecret) console.log(`[${SERVER_NAME}] seat-credentials=ON`);
+console.log(`[${SERVER_NAME}] listening on http://${config.host}:${server.port}`);
 console.log(`[${SERVER_NAME}] WebSocket endpoint: ws://localhost:${server.port}/ws`);
 console.log(`[${SERVER_NAME}] health: http://localhost:${server.port}/health`);
+// Machine-readable lifecycle event for supervisors (Docker/PM2): wait for
+// this line before routing clients to the reported port.
+console.log(
+  JSON.stringify({
+    event: "GAME_SERVER_READY",
+    port: server.port,
+    protocol: PROTOCOL_VERSION,
+    sqlitePath: config.sqlitePath ?? null,
+  }),
+);
 
 const shutdown = async (): Promise<void> => {
   console.log(`[${SERVER_NAME}] shutting down…`);

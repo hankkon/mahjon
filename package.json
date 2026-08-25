@@ -5,7 +5,7 @@
   "description": "Taiwan 16-tile Mahjong — Godot 4.7 client + Node.js/TypeScript authoritative server (pnpm monorepo)",
   "type": "module",
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.5.0"
   },
   "packageManager": "pnpm@11.21.0",
   "scripts": {
@@ -14,7 +14,11 @@
     "dev:web": "pnpm --filter @taiwan-mahjong/server dev:web",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "pnpm -r run typecheck"
+    "typecheck": "pnpm -r run typecheck",
+    "pack:core": "node tools/pack-core.mjs",
+    "pack:repo": "node tools/pack-repo.mjs",
+    "pack:zip": "python3 tools/pack_zip.py",
+    "pack": "pnpm run pack:repo && pnpm run pack:zip"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

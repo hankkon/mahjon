@@ -9,6 +9,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
     "serve": "node dist/apps/server/src/serve.js",
     "serve:web": "node dist/apps/server/src/serve-web.js",
     "start": "node dist/apps/server/src/serve-web.js",

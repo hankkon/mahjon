@@ -16,14 +16,14 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v3
+        uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 11
 
-      - name: Setup Node.js 20
+      - name: Setup Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22.x
           cache: 'pnpm'
 
       - name: Install dependencies
@@ -34,6 +34,9 @@ jobs:
 
       - name: Run Vitest Unit Test Suite
         run: pnpm test
+
+      - name: Run Monorepo Build
+        run: pnpm build
 
   godot-qa-check:
     name: Godot 4.7 Headless Render Check

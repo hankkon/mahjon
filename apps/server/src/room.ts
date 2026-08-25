@@ -28,6 +28,7 @@ import {
   detectWin,
   drawTile,
   evaluateFans,
+  headRemaining,
   nextSeat,
   performChi,
   performDiscard,
@@ -35,9 +36,11 @@ import {
   performPeng,
   pengOptions,
   qiangKong,
-  rngFromSeed,
+  qiangKongAll,
+  rollDice,
   seatDistance,
   seedFromString,
+  SeededRng,
   settleLedger,
   settleMultiLedger,
   type WinReaction,
@@ -66,7 +69,16 @@ export interface RoomOptions {
   id: string;
   variant: "north" | "south";
   dealer?: Seat;
+  /**
+   * Custom RNG injection (tests). When omitted the room owns a SeededRng
+   * derived from `rngSeed` (or the room id) — this lets serialize() capture
+   * the exact xorshift state for crash-recovery resume.
+   */
   rng?: RngFn;
+  /** Seed for the room-owned SeededRng (default: seedFromString(id)). */
+  rngSeed?: number;
+  /** Exact SeededRng state to resume from (restore path). */
+  rngState?: number;
   fanCap?: 4 | 8;
   pointPerFan?: number;
   /** Thinking-timeout for the discard/reaction phases (default 15s). */
@@ -78,6 +90,12 @@ export interface RoomOptions {
    * for a snapshot that never arrives. The Room itself never imports WSS.
    */
   onChange?: (room: Room) => void;
+  /**
+   * Fired on EVERY generation bump (join/ready/command/disconnect/autoplay).
+   * RoomManager wires this to the persistence repository — the authoritative
+   * state is saved at every mutation.
+   */
+  onMutation?: (room: Room) => void;
 }
 
 /** Outcome of executing a client command. */
@@ -88,6 +106,28 @@ export interface CommandResult {
 
 const SEATS: readonly Seat[] = [0, 1, 2, 3];
 const OTHERS = (seat: Seat): Seat[] => SEATS.filter((s) => s !== seat);
+
+/** Canonical JSON — key-sorted, so payloads serialize deterministically. */
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((v) => canonicalJson(v)).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) =>
+      a < b ? -1 : a > b ? 1 : 0,
+    );
+    return `{${entries
+      .map(([k, v]) => `${JSON.stringify(k)}:${canonicalJson(v)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+/** Content fingerprint for a client command (excludes transport metadata). */
+function commandFingerprint(command: ClientCommand): string {
+  const { operationId: _op, generationId: _gen, ...payload } = command;
+  return canonicalJson(payload);
+}
 
 /** Order win reactions by turn distance from the discarder (nearest first),
  * so the primary `winner` mirrors the old nearest-winner behaviour. */
@@ -119,6 +159,8 @@ export class Room implements RoomLike {
   private readonly variant: "north" | "south";
   /** Server-driven change notification (WSS re-broadcast). */
   private readonly onChange?: (room: Room) => void;
+  /** Persistence hook — fires on every bump (see RoomOptions.onMutation). */
+  private readonly onMutation?: (room: Room) => void;
   /** Current dealer seat (rotates after every hand: 莊家輪替). */
   private dealer: Seat;
   /** Consecutive dealer holds (連莊); 0 = fresh dealer. Feeds 連莊台 scoring. */
@@ -135,13 +177,20 @@ export class Room implements RoomLike {
     at: number;
   }> = [];
   private readonly rng: RngFn;
+  /** The room-owned SeededRng instance (null when a custom rng was injected). */
+  private readonly rngInstance: SeededRng | null;
   private readonly fanCap: 4 | 8;
   private readonly pointPerFan: number;
   /** Thinking timeout (15s default; configurable for tests / sims). */
   private readonly timeoutMs: number;
   private timeoutHandle: NodeJS.Timeout | null = null;
-  /** operationId dedup — executed commands only. */
-  private readonly executed = new Set<string>();
+  /**
+   * operationId → content fingerprint (canonical JSON of the payload). An
+   * operationId is never executed twice; reusing the same id with a DIFFERENT
+   * payload is rejected (COMMAND_ID_REUSED) — ported from the reference
+   * command-gateway. Durable via the room snapshot (crash-replay safe).
+   */
+  private readonly executed = new Map<string, string>();
   /**
    * Seats that already passed in the CURRENT reaction window. A pass only
    * removes that seat's pending kinds — the window closes only after EVERY
@@ -154,12 +203,22 @@ export class Room implements RoomLike {
     this.id = options.id;
     this.variant = options.variant;
     this.dealer = options.dealer ?? 0;
-    this.rng = options.rng ?? rngFromSeed(seedFromString(options.id));
+    if (options.rng) {
+      this.rng = options.rng;
+      this.rngInstance = null;
+    } else if (options.rngState !== undefined) {
+      this.rngInstance = SeededRng.fromState(options.rngState);
+      this.rng = () => this.rngInstance!.nextFloat();
+    } else {
+      this.rngInstance = new SeededRng(options.rngSeed ?? seedFromString(options.id));
+      this.rng = () => this.rngInstance!.nextFloat();
+    }
     this.fanCap = options.fanCap ?? 4;
     this.pointPerFan = options.pointPerFan ?? 100;
     this.timeoutMs = options.timeoutMs ?? 15_000;
     this.dealerStreak = 0;
     this.onChange = options.onChange;
+    this.onMutation = options.onMutation;
   }
 
   // -------------------------------------------------------------------------
@@ -259,7 +318,10 @@ export class Room implements RoomLike {
     for (const p of this.players) {
       if (p) p.ready = false;
     }
-    this.state = createGameState(this.variant, this.rng, this.dealer, this.dealerStreak);
+    // 骰子定門 (TAIWAN_WALL_OPENING_V1): the dealer rolls three dice before the
+    // deal; the total determines the opening seat and the wall break point.
+    const dice = rollDice(this.rng);
+    this.state = createGameState(this.variant, this.rng, this.dealer, this.dealerStreak, dice.values);
     // 莊家起手第 17 張視為本手「首張摸牌」：createGameState 的初始發牌不會設定
     // lastDrawnBy/lastDrawnTile，若不補上，客戶端在莊家首手（17 張）會無法以伺服器
     // 權威資料分離第 17 張（舊版 max-instanceId 啟發式會分錯張）。
@@ -271,11 +333,14 @@ export class Room implements RoomLike {
     this.kongDraw = false;
     this.breakdown = null;
     this.ledger = null;
-    this.scores = [0, 0, 0, 0];
     // A fresh round also resets the operationId idempotency ledger — otherwise
     // every round would re-accumulate executed operationIds forever.
     this.executed.clear();
     this.status = "playing";
+    // 天胡 (dealer wins on the initial 17-tile deal) — 合法即自動胡牌.
+    if (detectWin(dealerHand, this.state.melds[this.dealer] as Meld[]).win) {
+      this.finishWin(this.state, this.dealer, true, false);
+    }
     this.bump();
     this.scheduleAutoplay();
   }
@@ -289,14 +354,25 @@ export class Room implements RoomLike {
     if (seat === -1) {
       return { ok: false, error: { code: "not_in_room", message: "Player not in this room" } };
     }
-    // --- Stale generation check (防重) ---
+    // --- Idempotency + replay protection (same operationId never executed twice) ---
+    const fingerprint = commandFingerprint(command);
+    const seenFingerprint = this.executed.get(command.operationId);
+    if (seenFingerprint !== undefined) {
+      // Reusing the same operationId with DIFFERENT content is rejected — a
+      // client cannot burn an id and then smuggle a different action through it.
+      if (seenFingerprint !== fingerprint) {
+        return {
+          ok: false,
+          error: { code: "command_id_reused", message: "operationId reused with different payload" },
+        };
+      }
+      return { ok: true }; // idempotent replay
+    }
+
+    // --- Stale generation check for fresh commands (防重) ---
     const gen = command.generationId;
     if (gen !== undefined && gen < this.generationId) {
       return { ok: false, error: { code: "stale_generation", message: "Command is stale" } };
-    }
-    // --- Idempotency (same operationId never executed twice) ---
-    if (this.executed.has(command.operationId)) {
-      return { ok: true };
     }
 
     let result: CommandResult;
@@ -318,7 +394,7 @@ export class Room implements RoomLike {
     }
 
     if (result.ok) {
-      this.executed.add(command.operationId);
+      this.executed.set(command.operationId, fingerprint);
       this.bump();
     }
     // Any accepted command may have moved the game into a new phase — resync
@@ -413,9 +489,9 @@ export class Room implements RoomLike {
         if (!extra) {
           return { ok: false, error: { code: "illegal_kong", message: "Add-on tile not in hand" } };
         }
-        const robber = this.qiangKongCheck(state, OTHERS(seat), extra);
-        if (robber !== null) {
-          this.finishWin(state, robber, false, false, seat);
+        const robbers = this.qiangKongCheck(state, OTHERS(seat), extra);
+        if (robbers.length > 0) {
+          this.finishWin(state, robbers, false, false, seat, extra, true);
           return { ok: true };
         }
       }
@@ -479,9 +555,9 @@ export class Room implements RoomLike {
           if (!extra) {
             return { ok: false, error: { code: "illegal_kong", message: "Add-on tile not in hand" } };
           }
-          const robber = this.qiangKongCheck(state, OTHERS(seat), extra);
-          if (robber !== null) {
-            this.finishWin(state, robber, false, false, seat);
+          const robbers = this.qiangKongCheck(state, OTHERS(seat), extra);
+          if (robbers.length > 0) {
+            this.finishWin(state, robbers, false, false, seat, extra, true);
             return { ok: true };
           }
         }
@@ -610,8 +686,8 @@ export class Room implements RoomLike {
     state: GameState,
     robbers: readonly Seat[],
     extra: TileInstance,
-  ): Seat | null {
-    return qiangKong(
+  ): Seat[] {
+    return qiangKongAll(
       state,
       robbers,
       extra,
@@ -623,7 +699,7 @@ export class Room implements RoomLike {
         const melds = state.melds[seat] as Meld[];
         return detectWin([...hand, robbed], melds).win;
       },
-    ) as Seat | null;
+    ) as Seat[];
   }
 
   // -------------------------------------------------------------------------
@@ -634,6 +710,12 @@ export class Room implements RoomLike {
    * Settle a win — single winner, or 一砲多響 (P0-4) with multiple winners on
    * the same discard. `discardWinSeat` is required for 搶槓 (the kongger pays);
    * for a normal discard win it falls back to state.lastDiscardBy.
+   *
+   * `winningTile` is the tile that completed the hand: the last discard for a
+   * discard win, the drawn tile for a self-draw, or the robbed add-on tile for
+   * 搶槓. It is required by the wait-based fans (平胡/邊張/坎張/單吊/全求人)
+   * and is NOT stored in the winner's hand for discard wins — the full winning
+   * hand (hand + winningTile) is what scoring sees.
    */
   private finishWin(
     state: GameState,
@@ -641,20 +723,26 @@ export class Room implements RoomLike {
     selfDraw: boolean,
     kongDraw: boolean,
     discardWinSeat?: Seat,
+    winningTile?: TileInstance,
+    robbedKong = false,
   ): void {
     const winners = (Array.isArray(winner) ? winner : [winner]) as Seat[];
     const primary = winners[0]!;
-    // 莊家輪替 / 連莊: if the dealer is among the winners → 連莊 (streak+1);
-    // otherwise 過莊 (dealer passes to the next seat, streak resets to 0).
-    if (winners.includes(this.dealer)) {
-      this.dealerStreak += 1;
+    const handDealer = this.dealer;
+    const handDealerStreak = this.dealerStreak;
+    const isDealerWinning = winners.includes(handDealer);
+    const scoredStreak = isDealerWinning ? handDealerStreak + 1 : handDealerStreak;
+
+    // 莊家輪替 / 連莊 (update for the subsequent hand)
+    if (isDealerWinning) {
+      this.dealerStreak = handDealerStreak + 1;
     } else {
-      this.dealer = nextSeat(this.dealer);
+      this.dealer = nextSeat(handDealer);
       this.dealerStreak = 0;
     }
-    // Scoring reads state.dealerStreak for the 連莊台 fan — expose the
-    // updated streak so this hand's ledger reflects it.
-    state.dealerStreak = this.dealerStreak;
+    state.dealer = handDealer;
+    state.dealerStreak = scoredStreak;
+
     declareWin(state, primary, selfDraw);
     this.winner = primary;
     this.selfDraw = selfDraw;
@@ -662,17 +750,46 @@ export class Room implements RoomLike {
 
     // Per-winner scoring context. For discard wins the payer is the provided
     // discardWinSeat (搶槓 kongger) or the room's last discarder.
-    const ctxs: WinContext[] = winners.map((w) => ({
-      winner: w,
-      selfDraw,
-      kongDraw,
-      discardWin: !selfDraw,
-      discardWinSeat: !selfDraw ? (discardWinSeat ?? state.lastDiscardBy) : undefined,
-      dealerStreak: state.dealerStreak,
-      dealer: state.dealer,
-      hand: state.wall.hands[w] as readonly TileInstance[],
-      melds: state.melds[w] as Meld[],
-    }));
+    const ctxs: WinContext[] = winners.map((w) => {
+      const storedHand = state.wall.hands[w] as readonly TileInstance[];
+      const winTile =
+        winningTile ??
+        (selfDraw
+          ? state.lastDrawnBy === w && state.lastDrawnTile
+            ? state.lastDrawnTile
+            : storedHand[storedHand.length - 1]!
+          : state.lastDiscard);
+      // A discard win's winning tile lives in the pool, not the hand — scoring
+      // needs the complete 17-tile winning hand for wait/shape analysis.
+      const fullHand: readonly TileInstance[] =
+        winTile && storedHand.every((t) => t.instanceId !== winTile.instanceId)
+          ? [...storedHand, winTile]
+          : storedHand;
+      const noMeldsAnywhere = state.melds.every((m) => m.length === 0);
+      return {
+        winner: w,
+        selfDraw,
+        kongDraw,
+        discardWin: !selfDraw,
+        discardWinSeat: !selfDraw ? (discardWinSeat ?? state.lastDiscardBy) : undefined,
+        dealerStreak: scoredStreak,
+        dealer: handDealer,
+        variant: this.variant,
+        hand: fullHand,
+        melds: state.melds[w] as Meld[],
+        flowers: state.wall.flowers[w] as readonly TileInstance[],
+        winningTile: winTile,
+        robbedKong: robbedKong ? true : undefined,
+        // 天胡: dealer wins on the initial deal before any discard.
+        tianHu: selfDraw && w === handDealer && state.discards.length === 0 && noMeldsAnywhere,
+        // 地胡: non-dealer wins on the very first self-draw before any meld.
+        diHu: selfDraw && w !== handDealer && state.discards.length <= 1 && noMeldsAnywhere,
+        // 海底撈月: self-draw of the final wall tile.
+        lastTileDraw: selfDraw && headRemaining(state.wall) === 0,
+        // 河底撈魚: win off the discard of the final wall tile.
+        riverBottomDiscardWin: !selfDraw && headRemaining(state.wall) === 0,
+      };
+    });
     this.breakdown = evaluateFans(ctxs[0]!, this.fanCap);
     this.ledger =
       ctxs.length === 1
@@ -834,6 +951,82 @@ export class Room implements RoomLike {
     }
   }
 
+  // -------------------------------------------------------------------------
+  // Persistence — RoomSnapshot (SQLite restore support, Phase 1)
+  // -------------------------------------------------------------------------
+
+  /** A fully serializable snapshot of a Room's authoritative state. */
+  serialize(): RoomSnapshot {
+    return {
+      v: 1,
+      id: this.id,
+      variant: this.variant,
+      status: this.status,
+      generationId: this.generationId,
+      players: this.players,
+      state: this.state,
+      winner: this.winner,
+      selfDraw: this.selfDraw,
+      kongDraw: this.kongDraw,
+      breakdown: this.breakdown,
+      ledger: this.ledger,
+      scores: this.scores,
+      dealer: this.dealer,
+      dealerStreak: this.dealerStreak,
+      autoplay: this.autoplay,
+      phaseDeadline: null, // timers are re-scheduled after restore
+      autoplayLog: this.autoplayLog,
+      fanCap: this.fanCap,
+      pointPerFan: this.pointPerFan,
+      timeoutMs: this.timeoutMs,
+      rngState:
+        this.rngInstance?.getState() ??
+        new SeededRng(seedFromString(this.id)).getState(),
+      executed: [...this.executed.entries()],
+    };
+  }
+
+  /** Rebuild a Room from a persisted snapshot (crash recovery). */
+  static restore(
+    snapshot: RoomSnapshot,
+    hooks: { onChange?: (room: Room) => void; onMutation?: (room: Room) => void } = {},
+  ): Room {
+    const room = new Room({
+      id: snapshot.id,
+      variant: snapshot.variant,
+      dealer: snapshot.dealer as Seat,
+      fanCap: snapshot.fanCap,
+      pointPerFan: snapshot.pointPerFan,
+      timeoutMs: snapshot.timeoutMs,
+      rngState: snapshot.rngState,
+      onChange: hooks.onChange,
+      onMutation: hooks.onMutation,
+    });
+    room.status = snapshot.status;
+    room.generationId = snapshot.generationId;
+    room.players = snapshot.players;
+    room.state = snapshot.state;
+    room.winner = snapshot.winner;
+    room.selfDraw = snapshot.selfDraw;
+    room.kongDraw = snapshot.kongDraw;
+    room.breakdown = snapshot.breakdown;
+    room.ledger = snapshot.ledger;
+    room.scores = snapshot.scores;
+    room.dealerStreak = snapshot.dealerStreak;
+    room.autoplay = snapshot.autoplay;
+    room.autoplayLog = snapshot.autoplayLog;
+    room.executed.clear();
+    for (const [op, fp] of snapshot.executed) room.executed.set(op, fp);
+    // After a restart every socket is gone — mark seats offline. The room
+    // stays paused (no timer) until a player reconnects; setConnected(true)
+    // (via RoomManager.reconnect) already resumes scheduleAutoplay().
+    for (const p of room.players) {
+      if (p) p.connected = false;
+    }
+    room.phaseDeadline = null;
+    return room;
+  }
+
   /** Release timers (RoomManager cleanup / shutdown). */
   dispose(): void {
     this.clearAutoplay();
@@ -841,5 +1034,38 @@ export class Room implements RoomLike {
 
   private bump(): void {
     this.generationId += 1;
+    this.onMutation?.(this);
   }
+}
+
+/**
+ * Serializable Room state — persisted to SQLite (see repository.ts / sqlite.ts)
+ * so rooms survive server restarts. Timers, callbacks and reaction-window
+ * pass bookkeeping are NOT stored (they are re-created on restore).
+ */
+export interface RoomSnapshot {
+  v: 1;
+  id: string;
+  variant: "north" | "south";
+  status: RoomStatus;
+  generationId: number;
+  players: (RoomPlayer | null)[];
+  state: GameState | null;
+  winner: number | null;
+  selfDraw: boolean;
+  kongDraw: boolean;
+  breakdown: FanBreakdown | null;
+  ledger: LedgerEntry[] | null;
+  scores: number[];
+  dealer: number;
+  dealerStreak: number;
+  autoplay: boolean[];
+  phaseDeadline: number | null;
+  autoplayLog: Room["autoplayLog"];
+  fanCap: 4 | 8;
+  pointPerFan: number;
+  timeoutMs: number;
+  rngState: number;
+  /** [operationId, content fingerprint] pairs — durable command dedup. */
+  executed: Array<[string, string]>;
 }

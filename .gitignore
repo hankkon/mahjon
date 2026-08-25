@@ -20,8 +20,29 @@ letsencrypt/
 certbot/
 
 # ---- Godot client generated dirs (import cache / export output) ----
+.godot/
 apps/player-client/.godot/
 apps/player-client/export/*
 !apps/player-client/export/web
 *.tmp
 *.translation
+*.pck
+*.uid
+*.import/
+shader_cache/
+
+# ---- Packed archives & analysis artifacts ----
+*.zip
+*.tar
+*.gz
+*.tgz
+taiwan-mahjong-source.zip
+repomix-output.md
+ai-core-context.md
+
+# ---- Python / SQLite / Temp files ----
+__pycache__/
+*.pyc
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm

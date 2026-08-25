@@ -106,6 +106,22 @@ class TestClient {
     });
   }
 
+  sendRaw(data: string | Buffer): void {
+    if (this.closed) return;
+    this.ws.send(data);
+  }
+
+  waitForClose(): Promise<{ code: number; reason: string }> {
+    if (this.ws.readyState === WebSocket.CLOSED) {
+      return Promise.resolve({ code: 1000, reason: "" });
+    }
+    return new Promise((resolve) => {
+      this.ws.once("close", (code, reason) => {
+        resolve({ code, reason: reason.toString() });
+      });
+    });
+  }
+
   drain(type: string): ServerEvent[] {
     const out = this.queue.filter((e) => e.type === type);
     this.queue = this.queue.filter((e) => e.type !== type);
@@ -383,3 +399,121 @@ describe("WSS — reconnect", () => {
     c.close();
   });
 });
+
+describe("WSS — Security, Rate Limiting & Input Validation", () => {
+  it("rejects non-JSON and malformed commands with bad_json / bad_command", async () => {
+    const c = await connect();
+
+    // 1. Invalid JSON
+    c.sendRaw("{ not a json");
+    const err1 = (await c.next("error")) as Extract<ServerEvent, { type: "error" }>;
+    expect(err1.code).toBe("bad_json");
+
+    // 2. Non-object command (array)
+    c.sendRaw(JSON.stringify([1, 2, 3]));
+    const err2 = (await c.next("error")) as Extract<ServerEvent, { type: "error" }>;
+    expect(err2.code).toBe("bad_command");
+
+    // 3. Unknown command type
+    c.sendRaw(JSON.stringify({ type: "hack_win", operationId: "op-h1" }));
+    const err3 = (await c.next("error")) as Extract<ServerEvent, { type: "error" }>;
+    expect(err3.code).toBe("bad_command");
+
+    // 4. Missing operationId
+    c.sendRaw(JSON.stringify({ type: "ready" }));
+    const err4 = (await c.next("error")) as Extract<ServerEvent, { type: "error" }>;
+    expect(err4.code).toBe("bad_command");
+
+    // 5. Invalid discard tileInstanceId (string instead of number)
+    c.sendRaw(JSON.stringify({ type: "discard", operationId: "op-d", tileInstanceId: "123" }));
+    const err5 = (await c.next("error")) as Extract<ServerEvent, { type: "error" }>;
+    expect(err5.code).toBe("bad_command");
+
+    // 6. Invalid reaction kind
+    c.sendRaw(JSON.stringify({ type: "reaction", operationId: "op-r", kind: "invalid_reaction" }));
+    const err6 = (await c.next("error")) as Extract<ServerEvent, { type: "error" }>;
+    expect(err6.code).toBe("bad_command");
+
+    // 7. Invalid join roomId (empty string)
+    c.sendRaw(JSON.stringify({ type: "join", operationId: "op-j", roomId: "" }));
+    const err7 = (await c.next("error")) as Extract<ServerEvent, { type: "error" }>;
+    expect(err7.code).toBe("bad_command");
+
+    c.close();
+  });
+
+  it("enforces per-connection command rate limiting", async () => {
+    const rateLimitedServer = await startServer({
+      port: 0,
+      rateLimitMaxCommands: 5,
+      rateLimitWindowMs: 1000,
+    });
+    const c = new TestClient(`ws://127.0.0.1:${rateLimitedServer.port}/ws`);
+    await c.open();
+
+    // Send 10 rapid ping commands (exceeds rateLimitMaxCommands = 5)
+    for (let i = 0; i < 10; i++) {
+      c.send({ type: "ping", operationId: `op-rate-${i}`, t: i });
+    }
+
+    const rateLimitError = (await c.next("error", (e) => e.code === "rate_limited")) as Extract<
+      ServerEvent,
+      { type: "error" }
+    >;
+    expect(rateLimitError).toBeDefined();
+    expect(rateLimitError.code).toBe("rate_limited");
+
+    c.close();
+    await rateLimitedServer.stop();
+  });
+
+  it("enforces max payload size limits", async () => {
+    const smallPayloadServer = await startServer({
+      port: 0,
+      maxPayloadBytes: 512, // 512 bytes limit
+    });
+    const c = new TestClient(`ws://127.0.0.1:${smallPayloadServer.port}/ws`);
+    await c.open();
+
+    // Send an oversized payload (> 512 bytes)
+    const largeName = "X".repeat(600);
+    c.sendRaw(JSON.stringify({ type: "create", operationId: "op-large", playerName: largeName }));
+
+    // The server will either send payload_too_large error or ws will drop/close connection
+    const received = await Promise.race([
+      c.next("error", (e) => e.code === "payload_too_large" || e.code === "bad_command"),
+      c.waitForClose(),
+    ]);
+    expect(received).toBeDefined();
+
+    c.close();
+    await smallPayloadServer.stop();
+  });
+
+  it("dampens excessive error replies and terminates socket on abusive consecutive errors", async () => {
+    const strictErrorServer = await startServer({
+      port: 0,
+      maxErrorsPerWindow: 3,
+      maxConsecutiveErrors: 6,
+    });
+    const c = new TestClient(`ws://127.0.0.1:${strictErrorServer.port}/ws`);
+    await c.open();
+
+    // Send 12 malformed messages in rapid succession
+    for (let i = 0; i < 12; i++) {
+      c.sendRaw(`{ malformed_${i}`);
+    }
+
+    // Wait for the socket to close due to circuit breaker
+    const closeResult = await c.waitForClose();
+    expect(closeResult.code).toBe(4429);
+
+    // Verify received error replies are dampened (should be at most maxConsecutiveErrors + 1, not 12)
+    const errors = c.drain("error");
+    expect(errors.length).toBeLessThanOrEqual(5);
+
+    c.close();
+    await strictErrorServer.stop();
+  });
+});
+

@@ -14,12 +14,18 @@ import { fileURLToPath } from "node:url";
 import { RoomManager } from "./roomManager.js";
 import { GameServer } from "./wss.js";
 import { AiController } from "./aiController.js";
+import { SqliteRoomRepository } from "./sqlite.js";
+import type { RoomRepository } from "./repository.js";
 
 export { Room } from "./room.js";
 export { RoomManager } from "./roomManager.js";
 export { GameServer, GameSocket } from "./wss.js";
 export { AiController } from "./aiController.js";
 export { buildClientSnapshot } from "./snapshot.js";
+export { InMemoryRoomRepository } from "./repository.js";
+export type { RoomRepository } from "./repository.js";
+export { SqliteRoomRepository } from "./sqlite.js";
+export { loadServerConfig } from "./config.js";
 export * from "./protocol.js";
 
 export const SERVER_NAME = "taiwan-mahjong-server";
@@ -39,6 +45,22 @@ export interface ServerConfig {
    * headless tests / stress runs that manage their own rooms.
    */
   enableAi?: boolean;
+  /** SQLite path for durable rooms. When set, rooms survive restarts. */
+  sqlitePath?: string;
+  /** Seat credential HMAC secret (>=32 UTF-8 bytes). Enables credential checks. */
+  seatCredentialSecret?: string;
+  /** Server-side socket heartbeat ping interval (ms; <=0 disables). */
+  heartbeatIntervalMs?: number;
+  /** Max WebSocket payload size in bytes (default 64KB). */
+  maxPayloadBytes?: number;
+  /** Max commands allowed per connection per rate limit window (default 50). */
+  rateLimitMaxCommands?: number;
+  /** Command rate limit window in ms (default 1000ms). */
+  rateLimitWindowMs?: number;
+  /** Max error responses sent per window before dampening (default 10). */
+  maxErrorsPerWindow?: number;
+  /** Max consecutive errors before terminating connection (default 20). */
+  maxConsecutiveErrors?: number;
 }
 
 export interface RunningServer {
@@ -100,10 +122,20 @@ function serveStatic(webRoot: string, reqUrl: string, res: ServerResponse): void
 
 /** Start the authoritative game server on the given port. */
 export async function startServer(config: ServerConfig = {}): Promise<RunningServer> {
-  const { port = 3000, host = "0.0.0.0", variant = "north", timeoutMs, webRoot, enableAi = false } = config;
+  const {
+    port = 3000,
+    host = "0.0.0.0",
+    variant = "north",
+    timeoutMs,
+    webRoot,
+    enableAi = false,
+  } = config;
 
   const startedAt = new Date().toISOString();
-  const manager = new RoomManager({ roomOptions: { variant, timeoutMs } });
+  const repository: RoomRepository | null = config.sqlitePath
+    ? new SqliteRoomRepository(config.sqlitePath)
+    : null;
+  const manager = new RoomManager({ roomOptions: { variant, timeoutMs }, repository: repository ?? undefined });
   const httpServer = createServer((req, res) => {
     if (req.url === "/health" || req.url === "/healthz") {
       const mem = process.memoryUsage();
@@ -134,10 +166,24 @@ export async function startServer(config: ServerConfig = {}): Promise<RunningSer
     res.end("Not Found");
   });
 
-  const games = new GameServer({ httpServer, manager });
+  const games = new GameServer({
+    httpServer,
+    manager,
+    seatCredentialSecret: config.seatCredentialSecret,
+    heartbeatIntervalMs: config.heartbeatIntervalMs,
+    maxPayloadBytes: config.maxPayloadBytes,
+    rateLimitMaxCommands: config.rateLimitMaxCommands,
+    rateLimitWindowMs: config.rateLimitWindowMs,
+    maxErrorsPerWindow: config.maxErrorsPerWindow,
+    maxConsecutiveErrors: config.maxConsecutiveErrors,
+  });
   // Auto-fill + drive the 3 AIs (初級/中級/高級) for the play-now web flow.
   const ai = enableAi ? new AiController(manager, games) : null;
   ai?.start();
+
+  // Crash recovery: restore persisted rooms. They are marked offline and pause
+  // their timers until the players' sockets reconnect (join with playerId).
+  manager.loadPersisted((room) => games.broadcastRoom(room));
 
   const actualPort = await new Promise<number>((resolve, reject) => {
     httpServer.once("error", reject);
@@ -151,6 +197,7 @@ export async function startServer(config: ServerConfig = {}): Promise<RunningSer
     ai?.stop();
     await games.close();
     await new Promise<void>((resolve) => httpServer.close(() => resolve()));
+    repository?.close?.();
   };
 
   return { httpServer, manager, games, port: actualPort, stop, ai };

@@ -420,6 +420,12 @@ describe("Room — P0-4 一砲多響 (multi-win) integration", () => {
     state.wall.hands[2] = tiles16(WAIT_TONG7, 9500);
     // Seat 3 cannot win.
     state.wall.hands[3] = tiles16(NON_WINNING_16, 9600);
+    // The injected fixture hands do NOT account for flowers dealt during the
+    // initial deal — clear the per-seat flower collections so scoring sees the
+    // fixture exactly (otherwise residual 正花/花牌 fans skew the stakes).
+    state.wall.flowers[1] = [];
+    state.wall.flowers[2] = [];
+    state.wall.flowers[3] = [];
     // Seat 0 (the discarder) leads the winning tong:7.
     state.wall.hands[0]![0] = {
       instanceId: 8800,
@@ -569,17 +575,42 @@ describe("Room — 斷線逾時自動託管 (timeout autoplay)", () => {
   const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
   it("discard timeout auto-摸切: server discards the last-drawn tile", async () => {
-    const room = makeRoom({ timeoutMs: 20 });
+    // 300ms timeout: the 摸切 fires at ~300ms and the reaction auto-pass would
+    // only fire at ~600ms — so checking at ~350ms deterministically observes
+    // the open peng window (no timing luck).
+    const room = makeRoom({ timeoutMs: 300 });
     joinAll(room);
     readyAll(room);
     const state = room.state!;
     const dealerHand = state.wall.hands[0]!;
-    // Record the last-drawn tile (dealer drew it on deal).
-    const lastDrawn = dealerHand[dealerHand.length - 1]!;
+    // Force the 摸切 target to a known face and give seat 1 two matching tiles,
+    // so the auto-discard opens a peng window regardless of the dice-based deal.
+    const lastDrawn: TileInstance = {
+      instanceId: 7711,
+      tile: { kind: "numbered", suit: "wan", rank: 5 },
+    };
+    dealerHand[dealerHand.length - 1] = lastDrawn;
     state.lastDrawnBy = 0;
     state.lastDrawnTile = lastDrawn;
-    // Wait for the 20ms timeout → server auto-discards the last-drawn tile.
-    await sleep(60);
+    // Seat 1 can peng the wan:5 (two copies) but can NEVER win on it:
+    // honor counts 4/4/3/3 are illegal for a standard win, and the copy counts
+    // (4,4,3,3,3) cannot form 八對子 either. Seats 2/3 cannot react or win.
+    state.wall.hands[1] = [
+      ...tiles16(
+        ["honor:dong", "honor:dong", "honor:dong", "honor:dong",
+         "honor:nan", "honor:nan", "honor:nan", "honor:nan",
+         "honor:xi", "honor:xi", "honor:xi",
+         "honor:bei", "honor:bei", "honor:bei"],
+        7720,
+      ),
+      { instanceId: 7721, tile: { kind: "numbered", suit: "wan", rank: 5 } },
+      { instanceId: 7722, tile: { kind: "numbered", suit: "wan", rank: 5 } },
+    ];
+    state.wall.hands[2] = tiles16(NON_WINNING_16, 7800);
+    state.wall.hands[3] = tiles16(NON_WINNING_16, 7900);
+    // Wait past the 300ms discard timeout → server auto-discards the last-drawn
+    // tile, opening the seat-1 peng window (still open until ~600ms).
+    await sleep(350);
     expect(room.status).toBe("playing");
     // The last-drawn tile is gone from the hand (摸切).
     expect(dealerHand.some((t) => t.instanceId === lastDrawn.instanceId)).toBe(false);
