@@ -55,6 +55,21 @@ Suits:
 - **莊家 (Dealer): 17 tiles**
 - **閒家 (Non-dealers): 16 tiles each**
 
+### 2.2.1 Dice Wall Opening (骰子定門) — TAIWAN_WALL_OPENING_V1
+
+Before dealing, the dealer rolls **three dice** (each 1–6, total 3–18). The
+shuffled wall is arranged as 2-tile stacks (北部 72 stacks / 南部 68 stacks,
+18 / 17 per side):
+
+- **Opening seat (開門位)**: `openingSeat = dealer + (total − 1) mod 4`.
+- **Break point (斷牌點)**: count `total` stacks from the opening seat's right
+  edge; normal draws traverse the remaining stacks in ascending circular order.
+- The last 16 tiles of the resolved order stay the reserved tail (尾 16 張),
+  preserving the double-cursor model.
+
+Implemented in `packages/rules/src/dice.ts` (roll/validation) and
+`wall.ts` `applyWallOpening`. The room rolls dice per hand in `startGame`.
+
 ### 2.3 Fixed Tail — Double-Cursor Model (雙游標)
 
 The wall keeps a **fixed reserved tail of 16 tiles** (the 尾 16 張), never drawn
@@ -82,38 +97,52 @@ flower replacement (補花) or kong replacement (槓上補牌).
 
 #### 2.5.1 Fan Matrix (台數矩陣) — 現行實作
 
+> 整合自參考實作的 Taiwan V1 scoring policy（GameTower 台灣 16 張牌例、
+> 台灣麻將協會歸檔規則）。互斥取高：後者必然涵蓋前者時，只計高者。
+
 | 台 | 條件 | 值 |
 |---|---|---|
-| 自摸 | 自摸胡 | +1 |
-| 門清 | 無任何副露 | +1 |
-| 門清一摸三 | 自摸 + 無副露 | +3 |
+| 天胡 | 莊家起手 17 張即胡 | +24 |
+| 地胡 | 閒家第一輪自摸（無人副露） | +16 |
+| 自摸 | 自摸胡（有副露時） | +1 |
+| 門清 | 放槍、無任何副露 | +1 |
+| 門清一摸三 | 自摸 + 無副露（**取代** 自摸+門清，互斥取高） | +3 |
+| 平胡 | 全順子、放槍、無花、且非邊/坎/單吊聽 | +2 |
 | 碰碰胡 | 全刻子（無吃）+ 5 組 | +4 |
 | 混一色 | 單一數牌花色 + 字牌 | +4 |
 | 清一色 | 單一數牌花色（無字牌） | +8 |
-| 暗刻高階取代 | 每個暗刻 +1；碰碰胡成立時由碰碰胡取代（不疊加） | 0–5 |
+| 字一色 | 全字牌 | +16 |
+| 大三元 | 中發白皆為刻子 | +8 |
+| 小三元 | 中發白兩刻一對 | +4 |
+| 大四喜 | 東南西北皆為刻子 | +16 |
+| 小四喜 | 東南西北三刻一對 | +8 |
+| 全求人 | 四副露 + 單吊將（放槍胡） | +2 |
+| 三暗刻 / 四暗刻 / 五暗刻 | 3 / 4 / 5 個暗刻（含暗槓） | +2 / +5 / +8 |
+| 邊張 / 坎張 / 單吊 | 單聽（唯一胡張）且胡牌張角色唯一；**僅北部** | +1 各 |
+| 槓上開花 | 槓上補牌自摸 | +1 |
+| 搶槓 | 搶加槓胡牌 | +1 |
+| 海底撈月 | 摸到牆內最後一張牌自摸 | +1 |
+| 河底撈魚 | 最後一張牌放槍胡 | +1 |
+| 花牌 | 正花 +1 / 花槓（春夏秋冬、梅蘭竹菊）+2 / 八仙過海 +8 / 七搶一 +8 | 0–8 |
 | 莊家連莊台 | 莊家胡牌且連莊 streak > 1 | +streak−1 |
+
+**互斥取高（Implication exclusions）**：
+- 門清一摸三 取代 自摸 + 門清（門清自摸 = 3 台）。
+- 五暗刻 取代 四暗刻、三暗刻、碰碰胡、門清。
+- 四暗刻 取代 三暗刻。
+- 全求人 取代 單吊。
+- 邊張 / 坎張 / 單吊 排除 平胡（南部變體不計邊/坎/單吊，故不排除平胡）。
 
 - 頂標（cap）：預設 **4 台**，可設定為 8 台；rawTotal 超過 cap 即截斷。
 - 裸胡（無任何台）：結算仍至少算 **1 台**（`max(total, 1)`）。
 - 自摸：其餘三家各付「台數對應分數」全額給贏家。
 - 放槍：放槍者付全額，其餘非贏家各付半額（半額無條件捨去）。
 
-#### 2.5.2 規則待確認 — 門清自摸疊加
+#### 2.5.2 門清自摸語意 — 已定案
 
-現行實作（`scoring.ts` FAN_RULES）在「門清自摸」時**同時疊加**
-自摸(+1) + 門清(+1) + 門清一摸三(+3) = **5 台**（raw）。
-
-部分台灣北部牌例把「門清一摸三」視為**取代**前兩者的高階台（= 3 台），
-或僅疊加自摸(+1) + 門清一摸三(+3)（= 4 台）。
-
-**現況決策**：既有 golden 測試（GC-02/GC-14/GC-23/GC-25）已鎖定 raw=5，
-不可擅自改算法讓測試紅一片。若確認要改成「不重複」語意，需同步：
-1. 修改 `scoring.ts` 的 `門清一摸三` 規則（成立時不再計自摸/門清）；
-2. 更新 `__tests__/scoring.test.ts` 對應 golden 期望；
-3. 更新本小節。
-
-在台灣 16 張北部規則確認前，維持現行疊加語意並標註為
-**「規則待確認」**。
+門清自摸（門清一摸三）已依參考實作定案為 **3 台**：`門清一摸三` 是取代
+`自摸(+1)` 與 `門清(+1)` 的高階台（互斥取高），不再疊加為 5 台。
+既有 golden 測試（GC-02/GC-09/GC-14/GC-23/GC-25 等）已同步更新鎖定 raw=3 語意。
 
 ---
 
@@ -154,3 +183,59 @@ a non-flower tile is drawn — versioned `IMMEDIATE_TAIL_CHAIN_V1`.
 Because flowers never occupy the hand, each flower drawn adds one extra tile
 from the reserved deck cursor into the player's hand, preserving hand count
 while the wall/head is not disturbed for regular turns.
+
+---
+
+## 5. Persistence & Seat Credentials (持久化與座位憑證)
+
+### 5.1 Room Persistence (SQLite)
+
+When `SQLITE_PATH` is set, every room mutation (join/ready/command/disconnect/
+autoplay) is persisted to SQLite (`node:sqlite`, WAL journaling):
+
+- **Schema**: `rooms` (id, variant, status, snapshot_json, generation_id,
+  updated_at) + `schema_version`.
+- **Snapshot** (`Room.serialize()`): players, authoritative `GameState`, dealer
+  rotation, scores, generationId, the operationId→fingerprint dedup map, the
+  autoplay log, and the **exact xorshift RNG state** (`SeededRng.getState()`),
+  so a restored room resumes the exact next-hand shuffle sequence.
+- **Restore** (`RoomManager.loadPersisted()`): rooms are rebuilt offline
+  (timers paused); the first socket reconnect with the player's identity
+  resumes control via the normal `setConnected(true)` path.
+- **Single-instance architecture**: SQLite persistence (`SqliteRoomRepository`)
+  is designed for single-instance durability, crash recovery, and restart
+  persistence. The in-memory `RoomManager` is the single authoritative source of
+  truth. Active-active multi-process concurrent writes on a shared SQLite database
+  are explicitly unsupported. In scaled / multi-instance deployments, sticky room
+  routing (sharding per room) or a distributed coordinator must be used.
+
+### 5.2 Command Dedup — durable & content-locked
+
+Every command carries an `operationId`. The server stores `operationId →
+canonical payload fingerprint`:
+- Replaying the same id + same payload → idempotent `ok` (no re-execution).
+- Reusing the same id with a **different payload** → rejected
+  (`command_id_reused`) — a client cannot burn an id and smuggle a different
+  action through it.
+- The map is persisted in the room snapshot, so crash-replay stays safe.
+
+### 5.3 Seat Credentials
+
+When `SEAT_CREDENTIAL_SECRET` is set, each join issues an HMAC time-bound
+bearer credential `v1.<generation>.<expiresAt>.<sig>` bound to
+`roomId \0 seat \0 playerId`:
+
+- Reconnecting to an already-seated `playerId` **requires** a valid unexpired
+  credential — a player cannot guess into another player's seat.
+- `rotateRoomCredentials(roomId)` bumps the generation and invalidates every
+  previously issued credential for that room.
+- The Godot client stores the credential from `welcome`/`player.joined` and
+  sends it automatically on reconnect.
+
+### 5.4 Server lifecycle
+
+- `serve.ts` / `serve-web.ts` print a machine-readable `GAME_SERVER_READY`
+  JSON line after binding (for Docker/PM2 supervisors).
+- Server-side socket heartbeat pings and terminates unresponsive sockets
+  (`HEARTBEAT_INTERVAL_MS`, default 30s).
+

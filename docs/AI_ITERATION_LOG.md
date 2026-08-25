@@ -1,9 +1,154 @@
 # AI 自主迭代紀錄 (AI Iteration Log)
 
+- **執行日期**：2026-08-25
+- **工作範圍**：P0-A ~ P0-J 規格對齊與回歸測試、算台與結算時序優化、多局分數累積、一砲多響/搶槓零和性證明、OVERNIGHT_REPORT 產出
+
+---
+
+## 輪次 11：P0-A ~ P0-J 正確性收斂、狀態機嚴格對齊、全量規格驗證
+
+- **問題**：
+  1. `Room.startGame()` 內部有 `this.scores = [0,0,0,0]`，導致多局連打時總分遭歸零（P0-A）。
+  2. `finishWin()` 結算與算台先執行輪莊/連莊再組裝 `WinContext`，導致閒家胡牌換莊後 `diHu` 誤判為 false、`zhengHua` 正花判斷採用下一局莊家（P0-B）。
+  3. 一砲多響與搶槓多響需確保零和性，且 `qiangKongAll` 需支援所有符合胡牌條件者同時宣告（P0-C, P0-D）。
+  4. `handleCommand` 中 `operationId` 冪等性重試需先於 stale generation 檢查，以允許網路瞬斷重試（P0-I）。
+  5. 缺少單一整合驗證 P0-A ~ P0-J 規範的專屬回歸測試套件。
+
+- **修改檔案**：
+  - `apps/server/src/room.ts`（移除 `startGame` 中的 scores 歸零、修正 `finishWin` 莊家時序、支援 `qiangKongAll` 多人搶槓、調整 `operationId` 冪等性重試先於 stale generation 檢查）
+  - `packages/rules/src/kong.ts`（新增 `qiangKongAll`，`qiangKong` 保持短路向後相容）
+  - `packages/rules/src/win.ts`（確保花牌不可作為手牌或胡牌構成）
+  - `apps/server/src/__tests__/p0-spec-compliance.test.ts`（全新 P0-A ~ P0-J 專屬完整規格與回歸測試套件）
+  - `apps/server/src/__tests__/persistence.test.ts`（新增重啟還原後下一局洗牌/發牌完全重放確定性測試）
+  - `OVERNIGHT_REPORT.md`（完整過夜開發報告）
+
+- **驗證結果**：
+  - `pnpm test`：**256/256 PASS**（15 個測試檔案全數通過，1.3s）
+  - `pnpm typecheck`：**Done**（零型別錯誤）
+  - `pnpm build`：**Done**（編譯成功）
+  - Godot Headless QA Check (`qa_render_check.tscn`)：**PASS 58 / FAIL 0**
+
+---
+
+## 輪次 10：CI 升級、WSS 通訊防護強化、SQLite 單實例持久化明確化
+
+- **問題**：
+  1. `.github/workflows/ci.yml` 使用 Node 20 與 pnpm 9，與專案 packageManager (pnpm 11) 及 engines (Node >=22.5) 不一致，且遺漏 `pnpm build` 檢查。
+  2. `apps/server/src/wss.ts` 缺乏連線速率限制、訊息最大長度限制、結構化欄位檢查，且遭遇惡意或格式錯誤封包時可能無限回傳錯誤，造成伺服器 CPU/頻寬耗損。
+  3. `apps/server/src/roomManager.ts` 在 SQLite 持久化中假裝支援多程序並發（CAS 失敗後直接覆寫），未明確界定為單實例權威模型。
+  4. `.gitignore` 缺少 `.godot/` 根目錄、打包生成的 zip 檔、`repomix-output.md` 與 sqlite 暫存檔等規則。
+
+- **修改檔案**：
+  - `.github/workflows/ci.yml`（Node 22.x、pnpm 11、`pnpm/action-setup@v4`、加入 `pnpm build`）
+  - `apps/server/src/protocol.ts`（新增 `validateClientCommand`，嚴格檢查欄位長度、型別與範圍）
+  - `apps/server/src/wss.ts`（加入 `maxPayloadBytes` 64KB、每連線指令速率限制、有效負載大小與欄位驗證、錯誤降頻發送與過量錯誤中斷連線）
+  - `apps/server/src/index.ts`（`ServerConfig` 支援 WSS 防護參數透傳）
+  - `apps/server/src/roomManager.ts`（明確化單實例權威持久化模型，移除虛假的多程序並發註解與 CAS 覆寫）
+  - `apps/server/src/sqlite.ts`（加入 `closed` 狀態防護，避免關閉後非同步回呼存取報錯）
+  - `docs/spec.md`（更新 §5.1 明確記錄 SQLite Persistence 僅供單伺服器實例重啟/崩潰還原使用）
+  - `.gitignore`（補齊 `.godot/`、`*.zip`、`repomix-output.md`、`*.sqlite*`）
+  - 測試：`apps/server/src/__tests__/wss.test.ts`（新增非 JSON、不合法指令欄位、速率限制、超大負載、過量錯誤降頻與斷線測試）、`apps/server/src/__tests__/persistence.test.ts`（單實例持續狀態保存測試）
+
+- **驗證結果**：
+  - `pnpm test`：**243/243 PASS**（14 個測試檔案全數通過）
+  - `pnpm typecheck`：**Done**（零型別錯誤）
+  - `pnpm build`：**Done**（Monorepo 編譯成功）
+  - Godot Headless QA Check：**PASS 58 / FAIL 0**
+
+- **未解風險與建議**：
+  - 目前 SQLite 專責單實例耐久化（重啟還原），若未來需擴展為多實例 active-active，需採用 Room ID Sticky Routing（房間分流）或分散式協調器。
+  - Git index 中先前已追蹤 `apps/player-client/.godot/editor/...` 檔案，建議使用者後續可視需要執行 `git rm -r --cached apps/player-client/.godot` 以將其從版本控制中排除（本地檔案不受影響）。
+
+---
+
+## 輪次 9：伺服器工程防護層移植（持久化 / 憑證 / 防重放 / CAS）
+
+- **問題**：伺服器全記憶體、無驗證，重啟即丟牌局；任誰都能猜 playerId
+  佔別人座位；`operationId` 去重只存記憶體且不驗證內容。
+- **修改檔案**：
+  - `packages/rules/src/rng.ts`（`SeededRng.getState()/fromState()` 精確續接）
+  - `apps/server/src/{repository,sqlite,seat-credential,config}.ts`（新增）
+  - `apps/server/src/room.ts`（`serialize()/restore()`、fingerprint 去重）
+  - `apps/server/src/roomManager.ts`（repository 接線 + CAS + loadPersisted）
+  - `apps/server/src/wss.ts`（憑證發行/驗證/rotation、伺服器端心跳）
+  - `apps/server/src/{index,serve,serve-web}.ts`（SQLITE_PATH / SECRET /
+    HEARTBEAT env、`GAME_SERVER_READY` 生命週期事件）
+  - `apps/server/src/protocol.ts`（join 帶 `seatCredential`、事件回傳）
+  - `apps/player-client/scripts/NetworkManager.gd`（儲存並重連送出憑證）
+  - `Dockerfile`（`/data` volume + SQLITE_PATH）、`.env.example`
+  - 測試：`persistence.test.ts`、`seat-credential.test.ts`
+  - `docs/spec.md`（§5 持久化與憑證）
+- **修改內容**：
+  - SQLite（`node:sqlite`，WAL）：每個 room mutation 持久化快照，
+    重啟後 `loadPersisted()` 還原並暫停計時，玩家重連即續。
+  - `operationId → 內容指紋`：同 ID 不同 payload → `command_id_reused` 拒絕；
+    指紋隨快照持久化，崩潰重放也安全。
+  - HMAC 座位憑證（TTL + rotation）：重連需有效憑證，防佔位。
+  - 樂觀並發：`UPDATE … WHERE generation_id = ?`（CAS）。
+  - `GAME_SERVER_READY` JSON 行 + 伺服器端心跳。
+- **驗證結果**：
+  - `pnpm test`：**238/238 PASS**（新增 21 項：persistence 14 + credential 7）
+  - `pnpm typecheck` / `pnpm build`：Done
+  - **端到端煙霧測試**：開房 → 發憑證 → 殺伺服器 → 同 SQLite 重啟 →
+    無憑證重連被拒、帶憑證重連座位還原 ✅
+- **未解風險**：
+  - 多程序部署的 CAS 衝突回退是「重新整筆覆寫」；真正需要多實例時
+    應改為「重載後重放未套用指令」。
+  - 憑證 generation 在重啟後歸零（僅影響 rotation 後未重連的舊憑證）。
+
+---
+
+- **執行日期**：2026-08-23
+- **工作範圍**：整合參考實作（朋友的 Taiwan V1 平台）的麻將規則與伺服器接線
+
+---
+
+## 輪次 8：整合參考實作的台灣規則（骰子定門 / 等待分析 / 台數定案 / 伺服器接線）
+
+- **問題**：
+  1. `門清一摸三` 疊加語意（5 台）為「規則待確認」；參考實作已依
+     GameTower 牌例定案為「互斥取高」（門清自摸 = 3 台）。
+  2. 缺少骰子定門、邊張/坎張/單吊、平胡、全求人、三·四·五暗刻分級、河底撈魚。
+  3. `finishWin` 未把胡牌張、花牌、天胡/地胡/海底撈月/河底撈魚/搶槓
+     傳入計分 context——這些規則在真實對局從未觸發；放槍胡時計分拿到的
+     `hand` 也缺胡牌張（16 張而非完整 17 張）。
+
+- **修改檔案**：
+  - `packages/rules/src/dice.ts`（新增：三骰驗證與 `rollDice`）
+  - `packages/rules/src/wait.ts`（新增：聽牌張 + 胡牌張角色分析、分解枚舉）
+  - `packages/rules/src/wall.ts`（新增 `applyWallOpening` 骰子定門）
+  - `packages/rules/src/game.ts`（`createGameState` 支援骰子）
+  - `packages/rules/src/scoring.ts`（台數矩陣升級 + 互斥取高）
+  - `packages/rules/src/index.ts`（匯出 dice/wait）
+  - `apps/server/src/room.ts`（每手擲骰、天胡起手檢查、finishWin 完整接線）
+  - `packages/rules/src/__tests__/{scoring,wall-opening,dice,wait}.test.ts`
+  - `apps/server/src/__tests__/room.test.ts`（golden 更新 + fixture 花牌清理）
+  - `docs/spec.md`（2.2.1 骰子定門、2.5.1 台數矩陣、2.5.2 已定案）
+
+- **修改內容**：
+  - 門清一摸三改為取代自摸+門清（3 台），同步更新 golden 測試。
+  - 新增 平胡(2)、全求人(2)、邊張/坎張/單吊(1，僅北部)、三/四/五暗刻(2/5/8)、
+    河底撈魚(1)、天胡 24 台；五暗刻取代碰碰胡/門清，四暗刻取代三暗刻。
+  - 骰子定門：`openingSeat = dealer + (total−1) mod 4`，斷牌點後依序取牌，
+    尾 16 張不變（雙游標模型維持）。
+  - room `finishWin` 現在傳入完整 17 張胡牌手牌、胡牌張、花牌，並正確標記
+    天胡/地胡/海底撈月/河底撈魚/搶槓。
+
+- **驗證結果**：
+  - `pnpm test`：**217/217 PASS**（新增 32 項測試）
+  - `pnpm typecheck`：Done（零型別錯誤）
+- **未解風險**：
+  - 八仙過海/七搶一仍是「花牌台」附加在一般胡牌上；參考實作的「花牌即胡、
+    特定付款模式」尚未實作（付款模式需改 ledger 結構）。
+  - 南部變體不計邊/坎/單吊，平胡在南部不受其排除——已按參考實作。
+
+---
+
 - **執行日期**：2026-08-20
 - **工作範圍**：低風險穩定性、模組可維護性、Godot 客戶端 UI 品質提升
 
 ---
+
 
 ## 輪次 1：`table.gd` 冗餘手牌代碼清理與 View 委派收斂
 

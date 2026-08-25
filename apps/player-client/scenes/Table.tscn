@@ -387,11 +387,11 @@ anchor_left = 0.5
 anchor_top = 0.5
 anchor_right = 0.5
 anchor_bottom = 0.5
-offset_left = -36.0
-offset_top = -48.0
-offset_right = 36.0
-offset_bottom = 48.0
-custom_minimum_size = Vector2(72, 96)
+offset_left = -24.0
+offset_top = 80.0
+offset_right = 24.0
+offset_bottom = 144.0
+custom_minimum_size = Vector2(48, 64)
 expand_mode = 1
 stretch_mode = 5
 mouse_filter = 2
@@ -663,13 +663,13 @@ horizontal_alignment = 1
 [node name="EastPanel" type="VBoxContainer" parent="."]
 layout_mode = 1
 anchors_preset = -1
-anchor_left = 0.78
-anchor_top = 0.0
+anchor_left = 0.80
+anchor_top = 0.16
 anchor_right = 1.0
-anchor_bottom = 0.42
-offset_top = 56.0
+anchor_bottom = 0.70
+offset_top = 0.0
 offset_right = -16.0
-theme_override_constants/separation = 6
+theme_override_constants/separation = 4
 
 [node name="MeldArea" type="HBoxContainer" parent="EastPanel"]
 layout_mode = 2
@@ -697,12 +697,12 @@ layout_mode = 2
 layout_mode = 1
 anchors_preset = -1
 anchor_left = 0.0
-anchor_top = 0.0
-anchor_right = 0.22
-anchor_bottom = 0.42
+anchor_top = 0.16
+anchor_right = 0.20
+anchor_bottom = 0.70
 offset_left = 16.0
-offset_top = 56.0
-theme_override_constants/separation = 6
+offset_top = 0.0
+theme_override_constants/separation = 4
 
 [node name="MeldArea" type="HBoxContainer" parent="WestPanel"]
 layout_mode = 2
@@ -717,12 +717,12 @@ clip_contents = false
 [node name="NorthPanel" type="VBoxContainer" parent="."]
 layout_mode = 1
 anchors_preset = -1
-anchor_left = 0.0
+anchor_left = 0.28
 anchor_top = 0.0
-anchor_right = 1.0
-anchor_bottom = 0.42
-offset_top = 56.0
-theme_override_constants/separation = 6
+anchor_right = 0.72
+anchor_bottom = 0.20
+offset_top = 54.0
+theme_override_constants/separation = 4
 
 [node name="MeldArea" type="HBoxContainer" parent="NorthPanel"]
 layout_mode = 2
@@ -783,14 +783,14 @@ clip_contents = false
 unique_name_in_owner = true
 layout_mode = 1
 anchors_preset = -1
-anchor_left = 0.42
-z_index = 60
-anchor_top = 0.86
-anchor_right = 1.0
-anchor_bottom = 0.86
-offset_top = -56.0
+anchor_left = 0.35
+z_index = 80
+anchor_top = 0.68
+anchor_right = 0.95
+anchor_bottom = 0.74
+offset_top = 0.0
 offset_right = -16.0
-offset_bottom = -12.0
+offset_bottom = 0.0
 theme_override_constants/separation = 10
 visible = false
 
@@ -845,6 +845,7 @@ theme_override_styles/hover = SubResource("btn_win")
 theme_override_styles/pressed = SubResource("btn_win")
 theme_override_styles/focus = SubResource("btn_win")
 text = "胡"
+visible = false
 
 [node name="PassBtn" type="Button" parent="ReactionBar"]
 unique_name_in_owner = true

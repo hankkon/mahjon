@@ -175,17 +175,16 @@ func _scenario_c() -> void:
 	var is_red: bool = countdown_label.modulate.r > 0.8 and countdown_label.modulate.g < 0.4
 	_check("C：託管中倒數文字轉紅", is_red, "color=%s" % countdown_label.modulate.to_html())
 
-	# you=0 → B(seat1) 落在南面板（東→南→西→北 逆時針）。
-	# 直接掃描四家面板的標題 Label，找 ⚠託管中 標籤。
+	# you=0 → B(seat1) 落在 EastPanel（下家在右 逆時針）。
+	# 掃描四家面板，找 ⚠託管中 標籤。
 	var found_tag := false
 	var tag_text := ""
 	for pname in ["EastPanel", "SouthPanel", "WestPanel", "NorthPanel"]:
 		var panel: Node = _table.get_node(pname)
-		for child in panel.get_children():
-			if child is Label:
-				tag_text = child.text
-				if child.text.contains("⚠託管中"):
-					found_tag = true
+		for lbl in panel.find_children("", "Label", true, false):
+			if lbl.text.contains("⚠託管中"):
+				tag_text = lbl.text
+				found_tag = true
 	_check("C：側邊面板顯示 ⚠託管中 標籤", found_tag,
 		"text=%s" % tag_text)
 
@@ -281,8 +280,8 @@ func _scenario_e() -> void:
 func _scenario_f() -> void:
 	print("\n================= 情境 F：對手牌背與中央棄牌河 =================")
 	var you := 0
-	# you=0 → 座次映射：0=SouthPanel 1=WestPanel 2=NorthPanel 3=EastPanel。
-	# 對家 C(2) 在 NorthPanel 橫排；上家 B(1) WestPanel、下家 D(3) EastPanel 直列。
+	# you=0 → 逆時針座次映射：0=SouthPanel(我) 1=EastPanel(下家) 2=NorthPanel(對家) 3=WestPanel(上家)。
+	# 對家 C(2) 在 NorthPanel 橫排；下家 B(1) EastPanel、上家 D(3) WestPanel 直列。
 	var snap: Dictionary = _playing_snap(you, {
 		"discardsBySeat": [
 			["wan:1", "tong:2"],
@@ -345,27 +344,27 @@ func _scenario_f() -> void:
 	_check("F：下家牌背全部使用 back.png 貼圖", e_backs > 0 and e_backs_textured)
 
 	# F2：中央牌桌四邊內緣的棄牌河（無 Label 標題，純牌面貼圖）。
-	# 座次映射：seat0(South)→RiverBottom、seat1(West)→RiverLeft、
-	#          seat2(North)→RiverTop、seat3(East)→RiverRight。
+	# 逆時針座次映射：seat0(South)→RiverBottom、seat1(East)→RiverRight、
+	#              seat2(North)→RiverTop、seat3(West)→RiverLeft。
 	var river_bottom: Control = _table.get_node("%RiverBottom")
 	_check("F：RiverBottom(南/我) 棄牌貼圖 1萬/2筒",
 		_river_tile_ids(river_bottom) == ["wan:1", "tong:2"],
 		"實際=%s" % str(_river_tile_ids(river_bottom)))
 
-	var river_left: Control = _table.get_node("%RiverLeft")
-	_check("F：RiverLeft(西/上家) 棄牌貼圖 3條",
-		_river_tile_ids(river_left) == ["tiao:3"],
-		"實際=%s" % str(_river_tile_ids(river_left)))
+	var river_right: Control = _table.get_node("%RiverRight")
+	_check("F：RiverRight(東/下家) 棄牌貼圖 3條",
+		_river_tile_ids(river_right) == ["tiao:3"],
+		"實際=%s" % str(_river_tile_ids(river_right)))
 
 	var river_top: Control = _table.get_node("%RiverTop")
 	_check("F：RiverTop(北/對家) 無棄牌",
 		_river_tile_ids(river_top).is_empty(),
 		"實際=%s" % str(_river_tile_ids(river_top)))
 
-	var river_right: Control = _table.get_node("%RiverRight")
-	_check("F：RiverRight(東/下家) 棄牌貼圖 中/9萬/梅",
-		_river_tile_ids(river_right) == ["honor:zhong", "wan:9", "flower:mei"],
-		"實際=%s" % str(_river_tile_ids(river_right)))
+	var river_left: Control = _table.get_node("%RiverLeft")
+	_check("F：RiverLeft(西/上家) 棄牌貼圖 中/9萬/梅",
+		_river_tile_ids(river_left) == ["honor:zhong", "wan:9", "flower:mei"],
+		"實際=%s" % str(_river_tile_ids(river_left)))
 
 
 func _scenario_g() -> void:

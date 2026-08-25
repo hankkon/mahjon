@@ -148,14 +148,43 @@ func _get_seat_panels_view() -> RefCounted:
 			seat_panels_view = script.new(self)
 	return seat_panels_view
 
+## 相對座次 slot：以 you 為基準，逆時針出牌（下家在右、對家在上、上家在左）。
+func relative_slot(seat: int) -> String:
+	var you: int = GameState.you
+	var diff: int = (seat - you + 4) % 4
+	match diff:
+		0: return "bottom"
+		1: return "right"  # 下家在右
+		2: return "top"    # 對家在上
+		3: return "left"   # 上家在左
+	return "bottom"
+
+func panel_for_seat(seat: int) -> String:
+	match relative_slot(seat):
+		"bottom": return "SouthPanel"
+		"right": return "EastPanel"
+		"top": return "NorthPanel"
+		"left": return "WestPanel"
+	return "SouthPanel"
+
+func _update_seat_mapping() -> void:
+	_seat_to_panel.clear()
+	for seat in range(4):
+		_seat_to_panel[seat] = panel_for_seat(seat)
+
+func _rel_seat_name(seat: int) -> String:
+	var diff: int = (seat - GameState.you + 4) % 4
+	match diff:
+		0: return "你"
+		1: return "下家 " + GameState.seat_name(seat)
+		2: return "對家 " + GameState.seat_name(seat)
+		3: return "上家 " + GameState.seat_name(seat)
+	return GameState.seat_name(seat)
+
 func _ready() -> void:
 	_get_hand_view()
 	_apply_riichi_aesthetic_styles()
-	var you: int = GameState.you
-	var dirs := ["SouthPanel", "WestPanel", "NorthPanel", "EastPanel"]
-	for i in range(4):
-		var seat: int = (you + i) % 4
-		_seat_to_panel[seat] = dirs[i]
+	_update_seat_mapping()
 
 	_bind_touch_btn(leave_btn, _on_leave_pressed)
 	_bind_touch_btn(ready_btn, func(): NetworkManager.mark_ready())
@@ -219,6 +248,7 @@ func _exit_tree() -> void:
 # ---------------------------------------------------------------------------
 
 func _refresh() -> void:
+	_update_seat_mapping()
 	room_label.text = "房間：%s" % GameState.room_id
 	wall_label.text = "尾牆 %d / 牌牆 %d" % [GameState.wall_head_remaining, GameState.wall_deck_remaining]
 	_update_dealer_info()
@@ -257,7 +287,7 @@ func _render_lobby() -> void:
 	reaction_bar.visible = false
 	hand_panel.visible = false
 	table_center.visible = false
-	lobby_info.text = "房號：%s" % GameState.room_id
+	lobby_info.text = "房號：%s\n台灣 16 張：莊 17／閒 16；可胡則系統自動胡。" % GameState.room_id
 	var lines: Array = []
 	var my_ready := false
 	for p in GameState.players:
@@ -395,14 +425,14 @@ func _update_top_status() -> void:
 	if not GameState.is_playing():
 		status_label.text = "等待中"
 	elif GameState.game_phase == "reaction":
-		status_label.text = "反應視窗"
+		status_label.text = "等待吃碰 (反應視窗)"
 	elif GameState.turn == GameState.you:
 		if GameState.is_autoplay(GameState.you):
 			status_label.text = "你已自動託管（伺服器代打）"
 		else:
 			status_label.text = "輪到你出牌"
 	else:
-		status_label.text = "等待 %s 出牌…" % GameState.seat_name(GameState.turn)
+		status_label.text = "等待【%s】出牌…" % _rel_seat_name(GameState.turn)
 
 
 # ---------------------------------------------------------------------------
@@ -666,8 +696,8 @@ func _update_dealer_info() -> void:
 	var streak_txt: String = ""
 	if streak > 0:
 		streak_txt = "（連莊 %d）" % streak
-	dealer_info_label.text = "%s風 莊家 %s%s" % [
-		_wind_name(GameState.dealer), GameState.seat_name(GameState.dealer), streak_txt,
+	dealer_info_label.text = "莊家：%s%s" % [
+		GameState.seat_name(GameState.dealer), streak_txt,
 	]
 
 
@@ -683,12 +713,11 @@ func _update_compass() -> void:
 		return
 	center_compass.visible = true
 
-	# 圈風局數資訊
-	var dealer_wind: String = _wind_name(GameState.dealer)
+	# 圈風局數資訊：中央羅盤作為桌面上唯一的「圈風」標示中心
 	var streak: int = GameState.dealer_streak
 	var streak_txt: String = " 第 %d 局" % (streak + 1) if streak > 0 else " 第 1 局"
 	if compass_wind:
-		compass_wind.text = "%s風%s" % [dealer_wind if dealer_wind != "" else "東", streak_txt]
+		compass_wind.text = "東風圈%s" % streak_txt
 
 	# 剩餘牌數
 	if compass_wall:
@@ -705,14 +734,14 @@ func _update_compass() -> void:
 			compass_timer.text = "—"
 			compass_timer.modulate = Color(0.7, 0.7, 0.7, 1.0)
 
-	# 四向輪轉指示燈（以「座次→側邊」為準）
-	# bottom (我), top (北/對家), left (西/上家), right (東/下家)
+	# 四向輪轉指示燈（以「座次→側邊」為準，逆時針出牌：下家在右、對家在上、上家在左）
+	# bottom (我), top (對家), left (上家), right (下家)
 	var turn_seat: int = GameState.turn
 	var turn_side: String = _seat_side(turn_seat)
-	_style_compass_dir(dir_bottom, "▼ 南 (我)", turn_side == "bottom", turn_seat == GameState.you)
-	_style_compass_dir(dir_top, "▲ 北", turn_side == "top", false)
-	_style_compass_dir(dir_left, "◀西", turn_side == "left", false)
-	_style_compass_dir(dir_right, "東▶", turn_side == "right", false)
+	_style_compass_dir(dir_bottom, "▼ 我", turn_side == "bottom", turn_seat == GameState.you)
+	_style_compass_dir(dir_top, "▲ 對家", turn_side == "top", false)
+	_style_compass_dir(dir_left, "◀ 上家", turn_side == "left", false)
+	_style_compass_dir(dir_right, "下家 ▶", turn_side == "right", false)
 
 
 func _style_compass_dir(label: Label, base_text: String, is_active: bool, is_you: bool) -> void:
@@ -743,11 +772,11 @@ func _update_turn_banner() -> void:
 		turn_banner.modulate = Color(1.0, 0.88, 0.35, 1.0)
 	elif GameState.in_reaction_window():
 		turn_banner.visible = true
-		turn_banner.text = "⚡【請選擇】吃 / 碰 / 槓 / 過"
+		turn_banner.text = "⚡【等待吃碰】吃 / 碰 / 槓 / 過"
 		turn_banner.modulate = Color(0.3, 0.85, 1.0, 1.0)
 	else:
 		turn_banner.visible = true
-		var active_name: String = GameState.seat_name(GameState.turn)
+		var active_name: String = _rel_seat_name(GameState.turn)
 		turn_banner.text = "等待【%s】出牌中…" % active_name
 		turn_banner.modulate = Color(0.75, 0.75, 0.75, 0.85)
 
@@ -796,10 +825,9 @@ func _render_melds(seat: int) -> void:
 #   此處只保留：座次→河的只讀 helper，與最後棄牌大牌面（LastDiscardTile）。
 # ---------------------------------------------------------------------------
 
-## 座位 → 側名（bottom/top/left/right；依 _seat_to_panel 座次對映）。
+## 座位 → 側名（bottom/top/left/right；依 relative_slot 逆時針座次對映）。
 func _seat_side(seat: int) -> String:
-	var panel_name: String = _seat_to_panel.get(seat, "")
-	return river_view.side_for_panel(panel_name)
+	return relative_slot(seat)
 
 
 ## 離開 playing 狀態時隱藏所有河槽位（委派 RiverView）。

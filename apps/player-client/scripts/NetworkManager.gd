@@ -64,6 +64,10 @@ var _op_counter := 0
 var _pending_rejoin := false
 var _rejoin_room_id := ""
 var _rejoin_player_id := ""
+## 座位憑證（seat credential）— 伺服器開啟 SEAT_CREDENTIAL_SECRET 時，
+## 首次 join 會發行綁定「房間+座位+玩家」的 HMAC 憑證；重連必須帶上它
+## 才能恢復座位（防止假冒他人 playerId 佔位）。
+var seat_credential := ""
 
 func _ready() -> void:
 	# HTML5（網頁版）：預設連到「頁面所在的主機」— 由 serve:web 同源掛載 WSS，
@@ -163,6 +167,7 @@ func disconnect_from_server() -> void:
 	_pending_rejoin = false
 	_rejoin_room_id = ""
 	_rejoin_player_id = ""
+	seat_credential = ""
 	if socket != null:
 		socket.close(1000, "client leaving")
 		socket = null
@@ -253,11 +258,15 @@ func _handle_message(text: String) -> void:
 		"welcome":
 			player_id = event.get("playerId", "")
 			room_id = event.get("roomId", "") if event.get("roomId") != null else ""
+			if event.get("seatCredential") != null:
+				seat_credential = str(event.get("seatCredential", ""))
 			connected.emit(event.get("protocol", ""))
 		"room.created":
 			room_id = event.get("roomId", "")
 			room_created.emit(room_id)
 		"player.joined":
+			if event.get("seatCredential") != null:
+				seat_credential = str(event.get("seatCredential", ""))
 			player_joined.emit(event.get("playerId", ""), event.get("seat", -1))
 		"player.ready":
 			player_ready.emit(event.get("seat", -1))
@@ -310,10 +319,13 @@ func create_room() -> void:
 
 
 ## 加入房間。傳入先前的 player_id 可重連（伺服器恢復座位，含遊戲中）。
+## 若已持有座位憑證（首次 join 發行），重連時一併送出以通過驗證。
 func join_room(target_room_id: String, previous_player_id: String = "") -> void:
 	var payload: Dictionary = {"roomId": target_room_id, "playerName": player_name}
 	if previous_player_id != "":
 		payload["playerId"] = previous_player_id
+		if seat_credential != "":
+			payload["seatCredential"] = seat_credential
 	send_command("join", payload)
 
 

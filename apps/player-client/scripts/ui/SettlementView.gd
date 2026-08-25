@@ -45,11 +45,11 @@ func show(game_state: Node) -> void:
 		var winner: int = int(winner_v)
 		header.append("贏家：%s" % game_state.seat_name(winner))
 		if s.get("selfDraw", false):
-			header.append("自摸")
+			header.append("自摸（系統自動胡）")
 		elif s.get("kongDraw", false):
-			header.append("槓上開花")
+			header.append("槓上開花（系統自動胡）")
 		elif game_state.last_discard_by >= 0:
-			header.append("放槍胡（%s 放槍）" % game_state.seat_name(game_state.last_discard_by))
+			header.append("放槍胡（%s 放槍，系統自動胡）" % game_state.seat_name(game_state.last_discard_by))
 		var breakdown_v: Variant = s.get("breakdown", null)
 		var breakdown: Dictionary = breakdown_v if breakdown_v is Dictionary else {}
 		line_index = _render_fans(breakdown, line_index)
