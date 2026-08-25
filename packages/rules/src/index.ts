@@ -1,5 +1,6 @@
 export * from "./tiles.js";
 export * from "./rng.js";
+export * from "./dice.js";
 export * from "./wall.js";
 export * from "./types.js";
 export * from "./game.js";
@@ -7,5 +8,6 @@ export * from "./chi.js";
 export * from "./peng.js";
 export * from "./kong.js";
 export * from "./win.js";
+export * from "./wait.js";
 export * from "./scoring.js";
 export * from "./reactions.js";

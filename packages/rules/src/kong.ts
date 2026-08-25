@@ -179,7 +179,7 @@ function findInHand(state: GameState, seat: number, instanceId: number): TileIns
 
 /**
  * 搶槓 (qiang kong) — a player may win on the tile being added in an add-on
- * kong. Returns the seat of a valid robber (nearest by turn order), or null.
+ * kong. Returns all robber seats (nearest by turn order first).
  *
  * CRITICAL (P0-1): the robbed tile must be passed in explicitly by the caller
  * (the kongger's add-on tile instance from `performKong`'s option). It must
@@ -189,6 +189,25 @@ function findInHand(state: GameState, seat: number, instanceId: number): TileIns
  * caller can look up the correct per-seat melds (a fixed seat would silently
  * check the wrong player's open melds).
  */
+export function qiangKongAll(
+  state: GameState,
+  robbers: readonly number[],
+  extraTile: TileInstance,
+  handTilesOf: (seat: number) => readonly TileInstance[],
+  isWin: (seat: number, hand: readonly TileInstance[], extra: TileInstance) => boolean,
+): number[] {
+  if (robbers.length === 0) return [];
+  const turnSeat = state.turn;
+  const sorted = [...robbers].sort((a, b) => seatDistance(turnSeat, a) - seatDistance(turnSeat, b));
+  const winners: number[] = [];
+  for (const seat of sorted) {
+    if (isWin(seat, handTilesOf(seat), extraTile)) {
+      winners.push(seat);
+    }
+  }
+  return winners;
+}
+
 export function qiangKong(
   state: GameState,
   robbers: readonly number[],

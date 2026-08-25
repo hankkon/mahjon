@@ -12,14 +12,17 @@ import type { GameState, Meld } from "./types.js";
 
 export type { Variant, Seat };
 
-/** Build a fresh dealt game: wall dealt, dealer to discard. */
+/** Build a fresh dealt game: wall dealt, dealer to discard.
+ * When `diceValues` is provided the wall is opened by the Taiwan dice rule
+ * (骰子定門) before the deal. */
 export function createGameState(
   variant: Variant,
   rng: RngFn,
   dealer: Seat,
   dealerStreak = 0,
+  diceValues?: readonly number[],
 ): GameState {
-  const wall: WallState = createDeal(variant, rng, dealer);
+  const wall: WallState = createDeal(variant, rng, dealer, diceValues);
   return {
     wall,
     melds: [[], [], [], []],

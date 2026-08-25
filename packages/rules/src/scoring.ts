@@ -11,6 +11,7 @@ import type { Meld } from "./types.js";
 import type { Tile, TileInstance } from "./tiles.js";
 import { tileFromId, tileToId } from "./tiles.js";
 import { countById } from "./win.js";
+import { analyzeWait, hasAllChowsStructure, hasExclusiveWaitRole, type WaitRole } from "./wait.js";
 
 /** Fan cap options. */
 export type FanCap = 4 | 8;
@@ -30,6 +31,26 @@ export interface WinContext {
   dealerStreak?: number;
   /** The dealer's seat. */
   dealer: number;
+  /** Round wind: 0: East, 1: South, 2: West, 3: North. Defaults to 0 (East). */
+  roundWind?: number;
+  /** True when winning by robbing an add-on kong (搶槓). */
+  robbedKong?: boolean;
+  /** True when winning on the final available wall draw (海底撈月). */
+  lastTileDraw?: boolean;
+  /** True when dealer wins on initial deal (天胡). */
+  tianHu?: boolean;
+  /** True when non-dealer self-draws on the very first turn without open melds (地胡). */
+  diHu?: boolean;
+  /** Flowers collected by the winner. */
+  flowers?: readonly TileInstance[];
+  /** The tile that completed the winning hand (last discard / drawn tile / robbed kong tile). */
+  winningTile?: TileInstance;
+  /** Regional variant — 邊張/坎張/單吊 are NORTH-only (defaults to north). */
+  variant?: "north" | "south";
+  /** True when winning off the discard of the final wall tile (河底撈魚). */
+  riverBottomDiscardWin?: boolean;
+  /** Evaluate optional honor & wind triplets (default true for extended, false for legacy strict). */
+  evalHonors?: boolean;
   /** The winner's hand (14 for discard win, 15+ for self-draw with kong... adjusted by melds). */
   hand: readonly TileInstance[];
   /** The winner's open melds. */
@@ -50,42 +71,288 @@ export interface FanBreakdown {
 /** A rule that inspects the win and returns 0 or a positive fan value. */
 type FanRule = (ctx: WinContext) => number;
 
+function getTripletCounts(c: WinContext): Map<string, number> {
+  const counts = countById(c.hand);
+  const tripletMap = new Map<string, number>();
+  for (const [id, count] of counts) {
+    if (count >= 3) {
+      tripletMap.set(id, Math.floor(count / 3));
+    }
+  }
+  for (const m of c.melds) {
+    if (m.kind === "peng" || m.kind === "kong") {
+      const id = tileToId(m.claimed?.tile ?? m.tiles[0]!.tile);
+      tripletMap.set(id, (tripletMap.get(id) ?? 0) + 1);
+    }
+  }
+  return tripletMap;
+}
+
+function hasPairOf(c: WinContext, id: string): boolean {
+  const counts = countById(c.hand);
+  return (counts.get(id) ?? 0) >= 2;
+}
+
+function isBigThreeDragons(c: WinContext): boolean {
+  const triplets = getTripletCounts(c);
+  return (
+    (triplets.get("honor:zhong") ?? 0) >= 1 &&
+    (triplets.get("honor:fa") ?? 0) >= 1 &&
+    (triplets.get("honor:bai") ?? 0) >= 1
+  );
+}
+
+function isSmallThreeDragons(c: WinContext): boolean {
+  if (isBigThreeDragons(c)) return false;
+  const triplets = getTripletCounts(c);
+  const dragons = ["honor:zhong", "honor:fa", "honor:bai"];
+  const tripCount = dragons.filter((d) => (triplets.get(d) ?? 0) >= 1).length;
+  const pairCount = dragons.filter(
+    (d) => hasPairOf(c, d) && (triplets.get(d) ?? 0) === 0,
+  ).length;
+  return tripCount === 2 && pairCount >= 1;
+}
+
+function isBigFourWinds(c: WinContext): boolean {
+  const triplets = getTripletCounts(c);
+  const winds = ["honor:dong", "honor:nan", "honor:xi", "honor:bei"];
+  return winds.every((w) => (triplets.get(w) ?? 0) >= 1);
+}
+
+function isSmallFourWinds(c: WinContext): boolean {
+  if (isBigFourWinds(c)) return false;
+  const triplets = getTripletCounts(c);
+  const winds = ["honor:dong", "honor:nan", "honor:xi", "honor:bei"];
+  const tripCount = winds.filter((w) => (triplets.get(w) ?? 0) >= 1).length;
+  const pairCount = winds.filter(
+    (w) => hasPairOf(c, w) && (triplets.get(w) ?? 0) === 0,
+  ).length;
+  return tripCount === 3 && pairCount >= 1;
+}
+
+function isAllHonors(c: WinContext): boolean {
+  if (c.hand.length === 0 && c.melds.length === 0) return false;
+  for (const inst of c.hand) {
+    if (inst.tile.kind !== "honor") return false;
+  }
+  for (const m of c.melds) {
+    for (const inst of m.tiles) {
+      if (inst.tile.kind !== "honor") return false;
+    }
+  }
+  return true;
+}
+
+function countFlowerFans(c: WinContext): number {
+  if (!c.flowers || c.flowers.length === 0) return 0;
+  let fans = 0;
+  const flowerIds = new Set(c.flowers.map((f) => tileToId(f.tile)));
+
+  // 八仙過海 (8 fans)
+  if (flowerIds.size === 8) return 8;
+  // 七搶一 (8 fans)
+  if (flowerIds.size === 7) return 8;
+
+  // 花槓: 春夏秋冬 (2 fans) / 梅蘭竹菊 (2 fans)
+  const seasons = ["flower:chun", "flower:xia", "flower:qiu", "flower:dong"];
+  const plants = ["flower:mei", "flower:lan", "flower:zhu", "flower:ju"];
+  if (seasons.every((id) => flowerIds.has(id))) fans += 2;
+  if (plants.every((id) => flowerIds.has(id))) fans += 2;
+
+  // 正花 (1 fan each): winner seat relative to dealer
+  const seatWind = (c.winner - c.dealer + 4) % 4;
+  const seatFlowers = [
+    ["flower:chun", "flower:mei"], // 東
+    ["flower:xia", "flower:lan"], // 南
+    ["flower:qiu", "flower:zhu"], // 西
+    ["flower:dong", "flower:ju"], // 北
+  ][seatWind]!;
+
+  for (const sf of seatFlowers) {
+    if (flowerIds.has(sf)) fans += 1;
+  }
+  return fans;
+}
+
 const FAN_RULES: Array<{ rule: string; fn: FanRule }> = [
-  // 規則待確認：現行「自摸(1)」「門清(1)」「門清一摸三(3)」在門清自摸時會
-  // 同時加總（1+1+3=5）。部分台灣北部牌例把「門清一摸三」視為取代前兩者的
-  // 高階台，此處保留既有疊加語意，待規則確認後再調整，不 silent 改分。
-  { rule: "自摸", fn: (c) => (c.selfDraw ? 1 : 0) },
-  { rule: "門清", fn: (c) => (c.melds.length === 0 ? 1 : 0) },
+  { rule: "天胡", fn: (c) => (c.tianHu ? 24 : 0) },
+  { rule: "地胡", fn: (c) => (c.diHu ? 16 : 0) },
+  {
+    rule: "自摸",
+    // 門清自摸由 門清一摸三 取代 (互斥取高), so 自摸 only counts with open melds.
+    fn: (c) => (c.selfDraw && c.melds.length > 0 ? 1 : 0),
+  },
+  {
+    rule: "門清",
+    // 門清自摸由 門清一摸三 取代; 五暗刻 (更高) 取代 門清.
+    fn: (c) =>
+      c.melds.length === 0 && !c.selfDraw && countConcealedTriplets(c) < 5 ? 1 : 0,
+  },
   {
     rule: "門清一摸三",
     fn: (c) => (c.selfDraw && c.melds.length === 0 ? 3 : 0),
   },
   {
+    rule: "平胡",
+    fn: (c) => (isPingHu(c) ? 2 : 0),
+  },
+  {
     rule: "碰碰胡",
-    fn: (c) => (isPengHu(c) ? 4 : 0),
+    // 五暗刻 (更高) 取代 碰碰胡.
+    fn: (c) => (isPengHu(c) && countConcealedTriplets(c) < 5 ? 4 : 0),
   },
   {
     rule: "混一色",
     fn: (c) => {
+      if (isAllHonors(c)) return 0;
       const suits = distinctSuits(c);
       return suits.size === 2 && suits.has("honor") ? 4 : 0;
     },
   },
   {
     rule: "清一色",
-    fn: (c) => (distinctSuits(c).size === 1 ? 8 : 0),
+    fn: (c) => (distinctSuits(c).size === 1 && !isAllHonors(c) ? 8 : 0),
   },
   {
-    rule: "暗刻高階取代",
-    // Each concealed triplet is worth 1 fan. When 碰碰胡 (higher) applies, the
-    // concealed-triplet fans are replaced by it (高階取代) to avoid double count.
-    fn: (c) => (isPengHu(c) ? 0 : countClosedTriplets(c)),
+    rule: "字一色",
+    fn: (c) => (isAllHonors(c) ? 16 : 0),
+  },
+  {
+    rule: "大三元",
+    fn: (c) => (isBigThreeDragons(c) ? 8 : 0),
+  },
+  {
+    rule: "小三元",
+    fn: (c) => (isSmallThreeDragons(c) ? 4 : 0),
+  },
+  {
+    rule: "大四喜",
+    fn: (c) => (isBigFourWinds(c) ? 16 : 0),
+  },
+  {
+    rule: "小四喜",
+    fn: (c) => (isSmallFourWinds(c) ? 8 : 0),
+  },
+  {
+    rule: "全求人",
+    fn: (c) => (isAllExposed(c) ? 2 : 0),
+  },
+  {
+    rule: "三暗刻",
+    fn: (c) => (countConcealedTriplets(c) === 3 ? 2 : 0),
+  },
+  {
+    rule: "四暗刻",
+    fn: (c) => (countConcealedTriplets(c) === 4 ? 5 : 0),
+  },
+  {
+    rule: "五暗刻",
+    fn: (c) => (countConcealedTriplets(c) === 5 ? 8 : 0),
+  },
+  {
+    rule: "邊張",
+    fn: (c) => (isNorthVariant(c) && hasExclusiveWait(c, "EDGE") ? 1 : 0),
+  },
+  {
+    rule: "坎張",
+    fn: (c) => (isNorthVariant(c) && hasExclusiveWait(c, "CLOSED") ? 1 : 0),
+  },
+  {
+    rule: "單吊",
+    // 全求人 (更高) 取代 單吊.
+    fn: (c) =>
+      isNorthVariant(c) && hasExclusiveWait(c, "SINGLE") && !isAllExposed(c) ? 1 : 0,
+  },
+  {
+    rule: "槓上開花",
+    fn: (c) => (c.kongDraw ? 1 : 0),
+  },
+  {
+    rule: "搶槓",
+    fn: (c) => (c.robbedKong ? 1 : 0),
+  },
+  {
+    rule: "海底撈月",
+    fn: (c) => (c.lastTileDraw ? 1 : 0),
+  },
+  {
+    rule: "河底撈魚",
+    fn: (c) => (c.riverBottomDiscardWin ? 1 : 0),
+  },
+  {
+    rule: "花牌",
+    fn: (c) => countFlowerFans(c),
   },
   {
     rule: "莊家連莊台",
     fn: (c) => (c.winner === c.dealer && (c.dealerStreak ?? 1) > 1 ? c.dealerStreak! - 1 : 0),
   },
 ];
+
+// ---------------------------------------------------------------------------
+// Helpers for the extended fan matrix
+// ---------------------------------------------------------------------------
+
+/** 邊張/坎張/單吊 are NORTH-only regional patterns (default = north). */
+function isNorthVariant(c: WinContext): boolean {
+  return (c.variant ?? "north") === "north";
+}
+
+/** Exclusive single-wait role analysis for the winning tile. */
+function hasExclusiveWait(c: WinContext, role: WaitRole): boolean {
+  if (!c.winningTile) return false;
+  const analysis = analyzeWait(c.hand, c.melds, c.winningTile);
+  return analysis !== null && hasExclusiveWaitRole(analysis, role);
+}
+
+/**
+ * 平胡 (all chows): every group is a sequence, discard win, no flowers, and the
+ * wait is open (not 邊張/坎張/單吊).
+ */
+function isPingHu(c: WinContext): boolean {
+  if (c.selfDraw) return false;
+  if (c.flowers && c.flowers.length > 0) return false;
+  if (!hasAllChowsStructure(c.hand, c.melds)) return false;
+  // 邊張/坎張/單吊 are NORTH-only — they only disqualify 平胡 where they apply.
+  if (
+    isNorthVariant(c) &&
+    (hasExclusiveWait(c, "EDGE") ||
+      hasExclusiveWait(c, "CLOSED") ||
+      hasExclusiveWait(c, "SINGLE"))
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * 全求人 (all exposed): all four groups are open melds and the win comes off a
+ * discard with the pair won by 單吊.
+ */
+function isAllExposed(c: WinContext): boolean {
+  if (c.selfDraw) return false;
+  if (c.melds.length !== 4) return false;
+  if (!c.winningTile) return false;
+  const analysis = analyzeWait(c.hand, c.melds, c.winningTile);
+  return analysis !== null && hasExclusiveWaitRole(analysis, "SINGLE");
+}
+
+/**
+ * Count concealed triplets (暗刻): triplets inside the concealed hand plus
+ * concealed kongs. Used for 三/四/五暗刻.
+ */
+function countConcealedTriplets(c: WinContext): number {
+  const counts = countById(c.hand);
+  let triplets = 0;
+  for (const count of counts.values()) {
+    triplets += Math.floor(count / 3);
+  }
+  for (const m of c.melds) {
+    if (m.kind === "kong" && m.kongType === "closed") triplets += 1;
+  }
+  return triplets;
+}
+
 
 /** Isolate concealed groups from a concealed hand (no melds): 4 triplets/runs + pair. */
 function concealedGroups(hand: readonly TileInstance[]): Tile[][] {
@@ -117,17 +384,6 @@ function isPengHu(c: WinContext): boolean {
   const concealed = concealedGroups(c.hand);
   if (!allMeldsAreTriplets(concealed)) return false;
   return concealed.length + c.melds.length === 5;
-}
-
-/** Count closed triplets in the concealed hand (each counts as 1 fan). */
-function countClosedTriplets(c: WinContext): number {
-  if (c.melds.length > 0) return 0; // only pure concealed hands count (simplification)
-  const counts = countById(c.hand);
-  let triplets = 0;
-  for (const count of counts.values()) {
-    if (count === 3) triplets += 1;
-  }
-  return triplets;
 }
 
 function distinctSuits(c: WinContext): Set<string> {

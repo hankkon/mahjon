@@ -125,6 +125,32 @@ describe("detectWin — 八對子 (seven pairs + triplet)", () => {
     // Only 16 tiles → not a win.
     expect(detectWin(hand, []).win).toBe(false);
   });
+
+  it("八對半允許 4 張相同牌算兩對 (4 of a kind = 2 pairs)", () => {
+    const hand = tiles(
+      "wan:1", "wan:1", "wan:1", "wan:1", // 4 of a kind = 2 pairs
+      "wan:2", "wan:2", "wan:3", "wan:3",
+      "wan:4", "wan:4", "wan:5", "wan:5",
+      "wan:6", "wan:6", "tong:9", "tong:9", "tong:9", // 1 triplet
+    );
+    expect(hand).toHaveLength(17);
+    const result = detectWin(hand, []);
+    expect(result.win).toBe(true);
+    expect(result.kind).toBe("sevenPairs");
+  });
+
+  it("八對半允許 兩組 4 張相同牌 (two 4 of a kinds = 4 pairs)", () => {
+    const hand = tiles(
+      "wan:1", "wan:1", "wan:1", "wan:1", // 2 pairs
+      "wan:2", "wan:2", "wan:2", "wan:2", // 2 pairs
+      "wan:3", "wan:3", "wan:4", "wan:4",
+      "wan:5", "wan:5", "tong:9", "tong:9", "tong:9", // 1 triplet
+    );
+    expect(hand).toHaveLength(17);
+    const result = detectWin(hand, []);
+    expect(result.win).toBe(true);
+    expect(result.kind).toBe("sevenPairs");
+  });
 });
 
 describe("detectWin — kong adjustments", () => {

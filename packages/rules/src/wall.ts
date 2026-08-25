@@ -11,6 +11,7 @@
 
 import type { RngFn } from "./rng.js";
 import { shuffle } from "./rng.js";
+import { createDiceResult, type DiceResult } from "./dice.js";
 import { TAIL_SIZE, buildDeck, type Tile, type TileInstance } from "./tiles.js";
 
 export type Variant = "north" | "south";
@@ -136,15 +137,100 @@ export function dealInitial(state: WallState, dealerIndex: Seat): WallState {
   return state;
 }
 
-/** One-shot convenience: build wall + deal for a given variant & dealer. */
+/** One-shot convenience: build wall + deal for a given variant & dealer.
+ * When `diceValues` is provided, the wall is opened by the Taiwan dice rule
+ * (骰子定門) before the deal — the head starts at the dice break point. */
 export function createDeal(
   variant: Variant,
   rng: RngFn,
   dealerIndex: Seat,
+  diceValues?: readonly number[],
 ): WallState {
   const state = createWall(variant, rng);
+  if (diceValues) applyWallOpening(state, dealerIndex, diceValues);
   dealInitial(state, dealerIndex);
   return state;
+}
+
+export interface WallOpening {
+  diceResult: DiceResult;
+  /** Seat counted to from the dealer (dice total minus one, mod 4). */
+  openingSeat: Seat;
+  openingSeatOffset: number;
+  /** 2 tiles per stack, 72 stacks (north) / 68 stacks (south). */
+  stacksPerSide: number;
+  totalStacks: number;
+  /** Stacks left uncut from the opening seat's right edge (dice total). */
+  stacksToLeave: number;
+  openingCountingOriginStackIndex: number;
+  breakAfterStackIndex: number;
+  /** First stack of the normal head draw order (circular index). */
+  normalDrawStartStackIndex: number;
+}
+
+/**
+ * TAIWAN_WALL_OPENING_V1 — 台灣骰子定門.
+ *
+ * Rearranges the shuffled wall so normal head draws start at the dice break
+ * point: the dealer rolls three dice; counting `total` stacks from the right
+ * edge of the opening seat's wall (openingSeat = dealer + (total−1) mod 4),
+ * the wall breaks there and normal draws traverse the remaining stacks in
+ * ascending circular order. The last 16 tiles of the resolved order stay the
+ * reserved replacement tail (尾 16 張), preserving the double-cursor model.
+ */
+export function applyWallOpening(
+  state: WallState,
+  dealer: Seat,
+  diceValues: readonly number[],
+): WallOpening {
+  const diceResult = createDiceResult(diceValues);
+  const total = diceResult.total;
+  const totalStacks = state.wall.length / 2;
+  if (!Number.isInteger(totalStacks)) {
+    throw new Error("Wall must have an even tile count for stacking");
+  }
+  const stacksPerSide = totalStacks / 4;
+  if (!Number.isInteger(stacksPerSide)) {
+    throw new Error("Wall must divide into four equal sides");
+  }
+
+  const openingSeatOffset = (total - 1) % 4;
+  const openingSeat = ((dealer + openingSeatOffset) % 4) as Seat;
+  const openingCountingOriginStackIndex = openingSeat * stacksPerSide;
+  const stacksToLeave = total;
+  const normalDrawStartStackIndex =
+    (openingCountingOriginStackIndex + stacksToLeave) % totalStacks;
+  const breakAfterStackIndex =
+    (normalDrawStartStackIndex - 1 + totalStacks) % totalStacks;
+
+  const wall = state.wall;
+  const reordered: TileInstance[] = [];
+  for (let offset = 0; offset < totalStacks; offset++) {
+    const stackIndex = (normalDrawStartStackIndex + offset) % totalStacks;
+    const first = wall[stackIndex * 2];
+    const second = wall[stackIndex * 2 + 1];
+    if (!first || !second) {
+      throw new Error(`Wall stack ${stackIndex} is incomplete`);
+    }
+    reordered.push(first, second);
+  }
+
+  state.wall = reordered;
+  state.headCursor = 0;
+  state.tailStart = reordered.length - TAIL_SIZE;
+  state.deckCursor = state.tailStart;
+
+  return {
+    diceResult,
+    openingSeat,
+    openingSeatOffset,
+    stacksPerSide,
+    totalStacks,
+    stacksToLeave,
+    openingCountingOriginStackIndex,
+    breakAfterStackIndex,
+    normalDrawStartStackIndex,
+  };
 }
 
 /** Normal turn draw: head tile + immediate flower chain if needed. */

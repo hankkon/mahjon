@@ -122,6 +122,7 @@ function canPartition(counts: Map<number, number>, meldCount: number): boolean {
  * any claimed discard for a win-off-discard), plus the player's open melds.
  */
 export function detectWin(hand: readonly TileInstance[], openMelds: readonly Meld[]): WinResult {
+  if (hand.some((t) => t.tile.kind === "flower")) return { win: false };
   const kongCount = openMelds.filter((m) => m.kind === "kong").length;
   const total = hand.length + openMelds.reduce((acc, m) => acc + m.tiles.length, 0);
   // Taiwan 16-tile mahjong winning hand = 17 tiles + 1 per kong (each kong
@@ -196,20 +197,28 @@ export function detectWin(hand: readonly TileInstance[], openMelds: readonly Mel
 }
 
 /**
- * Seven pairs (八對子) in Taiwan 16-tile mahjong: 7 complete pairs + 1 triplet
- * (the winning tile completes the final pair into a triplet) = 17 tiles, with
- * no open melds.
+ * Seven pairs / Eight pairs (八對半 / 嚦咕嚦咕) in Taiwan 16-tile mahjong:
+ * 7 complete pairs + 1 triplet = 17 tiles, with no open melds.
+ * 4 identical tiles are allowed and count as 2 pairs.
  */
-function trySevenPairs(hand: readonly TileInstance[]): boolean {
+export function trySevenPairs(hand: readonly TileInstance[]): boolean {
   if (hand.length !== 17) return false;
   const counts = countById(hand);
-  if (counts.size !== 8) return false;
-  const values = [...counts.values()].sort((a, b) => a - b);
-  // 7 pairs (2 each) + 1 triplet (3).
-  for (let i = 0; i < 7; i++) {
-    if (values[i] !== 2) return false;
+  let pairs = 0;
+  let triplets = 0;
+  for (const count of counts.values()) {
+    if (count === 2) {
+      pairs += 1;
+    } else if (count === 3) {
+      pairs += 1;
+      triplets += 1;
+    } else if (count === 4) {
+      pairs += 2;
+    } else {
+      return false;
+    }
   }
-  return values[7] === 3;
+  return pairs === 8 && triplets === 1;
 }
 
 /**

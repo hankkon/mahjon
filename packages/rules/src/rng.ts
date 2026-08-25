@@ -31,6 +31,18 @@ export class SeededRng {
     this.state = x >>> 0;
     return this.state / 0x1_0000_0000;
   }
+
+  /** The current internal 32-bit state (for serialization / exact resume). */
+  getState(): number {
+    return this.state >>> 0;
+  }
+
+  /** Rebuild a PRNG from a previously captured state (exact resume). */
+  static fromState(state: number): SeededRng {
+    const rng = new SeededRng(0x9e3779b9);
+    rng.state = state >>> 0;
+    return rng;
+  }
 }
 
 /** Build a callable `RngFn` from a SeededRng instance. */
