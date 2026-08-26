@@ -1,7 +1,32 @@
 # AI 自主迭代紀錄 (AI Iteration Log)
 
 - **執行日期**：2026-08-26
-- **工作範圍**：向聽數與牌效啟發式 AI 決策引擎防守增強、伺服器定時房間清理排程、/health 指標強化、1,000 局高並發自我對弈基準測試與不變式證明
+- **工作範圍**：參考 Stake 實作 Provably Fair (可證明公平性) 種子序與承諾驗證機制、每局種子衍生、SHA-256 承諾廣播、結算開牌驗證、復現重放測試
+
+---
+
+## 輪次 13：Stake-Compliant Provably Fair (可證明公平性) 種子機制實作
+
+- **問題**：
+  1. 玩家無法獨立驗證伺服器洗牌與骰子是否在發牌後遭到篡改或作弊。
+  2. 缺乏對齊 Stake / Crypto Gaming 工業標準的 `Server Seed + Client Seed + Nonce` 承諾與結算開牌驗證機制。
+
+- **修改檔案**：
+  - `packages/rules/src/provably-fair.ts`（全新 Provably Fair 密碼學模組：256-bit serverSeed 生成、SHA-256 承諾雜湊、HMAC-SHA256 局種子衍生、proof 驗證器）
+  - `packages/rules/src/index.ts`（導出 Provably Fair 模組）
+  - `packages/rules/src/__tests__/provably-fair.test.ts`（全新 5 個單元測試，涵蓋金鑰生成、雜湊承諾、確定性衍生、防篡改驗證與牌局 100% 相同重放）
+  - `apps/server/src/protocol.ts`（新增 `SetClientSeedCommand` 與 `set_client_seed` 格式檢查）
+  - `apps/server/src/snapshot.ts`（`ClientSnapshot` 加入局前 `serverSeedHash` 承諾與局後 `proof` 揭露）
+  - `apps/server/src/room.ts`（每手局自動生成 serverSeed / hash / 累加 handNonce、`startGame` 衍生種子、結算揭露 proof、支援持久化儲存還原）
+  - `apps/server/src/__tests__/provably-fair-server.test.ts`（全新伺服器房間 Provably Fair 整合測試）
+  - `docs/spec.md`（新增 §5.5 Provably Fair Verification 規格文件）
+
+- **驗證結果**：
+  - `pnpm test`：**264/264 PASS**（17 個測試檔案全數通過）
+  - `pnpm typecheck`：**Done**（零型別錯誤）
+  - `pnpm build`：**Done**（編譯成功）
+  - `pnpm benchmark 100`：**100 局完成 (14.0s, 7.1 局/秒)**（零和性與牌山 0 違規）
+  - Godot Headless QA Check (`qa_render_check.tscn`)：**PASS 58 / FAIL 0**
 
 ---
 

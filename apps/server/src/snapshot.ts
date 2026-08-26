@@ -18,6 +18,7 @@ import type {
   Numbered,
   Suit,
   TileInstance,
+  ProvablyFairProof,
 } from "@taiwan-mahjong/rules";
 import {
   chiOptions,
@@ -126,6 +127,13 @@ export interface ClientSnapshot {
   }>;
   winner: number | null;
   settlement: SettlementView | null;
+  /** Stake-compliant Provably Fair commitment (pre-game hash) and proof (post-game reveal). */
+  provablyFair?: {
+    serverSeedHash: string | null;
+    clientSeed: string;
+    nonce: number;
+    proof?: ProvablyFairProof | null;
+  } | null;
 }
 
 /** Structural contract Room satisfies so snapshot.ts never imports room.ts. */
@@ -154,6 +162,10 @@ export interface RoomLike {
     reason: "timeout" | "disconnect";
     at: number;
   }>;
+  serverSeedHash: string | null;
+  clientSeed: string;
+  handNonce: number;
+  provablyFairProof: ProvablyFairProof | null;
 }
 
 export interface RoomPlayerLike {
@@ -345,6 +357,15 @@ export function buildClientSnapshot(room: RoomLike, seat: number): ClientSnapsho
             breakdown: room.breakdown,
             ledger: room.ledger,
             scores: room.scores,
+          }
+        : null,
+    provablyFair:
+      room.serverSeedHash || room.provablyFairProof
+        ? {
+            serverSeedHash: room.serverSeedHash ?? room.provablyFairProof?.serverSeedHash ?? null,
+            clientSeed: room.clientSeed,
+            nonce: room.handNonce,
+            proof: room.status === "ended" ? room.provablyFairProof : null,
           }
         : null,
   };

@@ -629,6 +629,15 @@ describe("Room — 斷線逾時自動託管 (timeout autoplay)", () => {
     joinAll(room);
     readyAll(room);
     const state = room.state!;
+
+    // Ensure seat 1 has 2 copies of seat 0's first tile so a reaction window opens
+    const discardTile = state.wall.hands[0]![0]!;
+    state.wall.hands[1] = [
+      ...state.wall.hands[1]!.slice(0, 14),
+      { instanceId: 8881, tile: { ...discardTile.tile } },
+      { instanceId: 8882, tile: { ...discardTile.tile } },
+    ];
+
     // Open a reaction window: discard seat 0's first tile.
     const res = room.handleCommand("a", firstDiscard(room, 0));
     expect(res.ok).toBe(true);

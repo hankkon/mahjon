@@ -44,6 +44,11 @@ import {
   settleLedger,
   settleMultiLedger,
   type WinReaction,
+  type ProvablyFairProof,
+  createProvablyFairRng,
+  generateClientSeed,
+  generateServerSeed,
+  hashServerSeed,
 } from "@taiwan-mahjong/rules";
 import type { ClientCommand, ReactionCommand } from "./protocol.js";
 import type { RoomLike, RoomPlayerLike } from "./snapshot.js";
@@ -83,6 +88,12 @@ export interface RoomOptions {
   pointPerFan?: number;
   /** Thinking-timeout for the discard/reaction phases (default 15s). */
   timeoutMs?: number;
+  /** Stake-compliant Provably Fair initial client seed (default CSPRNG random). */
+  clientSeed?: string;
+  /** Secret server seed (if resuming/injecting). */
+  serverSeed?: string;
+  /** Current hand sequence / nonce (starts at 0). */
+  handNonce?: number;
   /**
    * Fired after a server-driven mutation (autoplay 摸切/pass, disconnect
    * force-autoplay) bumps the room generation. WSS subscribes to re-broadcast
@@ -176,9 +187,19 @@ export class Room implements RoomLike {
     reason: "timeout" | "disconnect";
     at: number;
   }> = [];
+
+  /** Stake-compliant Provably Fair State */
+  serverSeed: string | null = null;
+  serverSeedHash: string | null = null;
+  clientSeed: string;
+  handNonce = 0;
+  provablyFairProof: ProvablyFairProof | null = null;
+  private activeDerivedSeed: number | null = null;
+
   private readonly rng: RngFn;
+  private readonly hasExplicitRngSeed: boolean;
   /** The room-owned SeededRng instance (null when a custom rng was injected). */
-  private readonly rngInstance: SeededRng | null;
+  private rngInstance: SeededRng | null;
   private readonly fanCap: 4 | 8;
   private readonly pointPerFan: number;
   /** Thinking timeout (15s default; configurable for tests / sims). */
@@ -203,6 +224,12 @@ export class Room implements RoomLike {
     this.id = options.id;
     this.variant = options.variant;
     this.dealer = options.dealer ?? 0;
+    this.clientSeed = options.clientSeed ?? generateClientSeed();
+    this.serverSeed = options.serverSeed ?? null;
+    this.serverSeedHash = this.serverSeed ? hashServerSeed(this.serverSeed) : null;
+    this.handNonce = options.handNonce ?? 0;
+    this.hasExplicitRngSeed = options.rngSeed !== undefined || options.rngState !== undefined;
+
     if (options.rng) {
       this.rng = options.rng;
       this.rngInstance = null;
@@ -304,6 +331,8 @@ export class Room implements RoomLike {
     this.kongDraw = false;
     this.breakdown = null;
     this.ledger = null;
+    this.serverSeed = null;
+    this.serverSeedHash = null;
     this.bump();
     return true;
   }
@@ -318,10 +347,31 @@ export class Room implements RoomLike {
     for (const p of this.players) {
       if (p) p.ready = false;
     }
+
+    // Provably Fair (Stake-compliant seed derivation per hand)
+    if (!this.serverSeed) {
+      this.serverSeed = generateServerSeed();
+      this.serverSeedHash = hashServerSeed(this.serverSeed);
+    }
+    this.handNonce += 1;
+    const pf = createProvablyFairRng(this.serverSeed, this.clientSeed, this.handNonce);
+    this.activeDerivedSeed = pf.derivedSeed;
+
+    // Use custom test RNG or existing continuous rngInstance if explicitly seeded in options
+    let effectiveRng: RngFn;
+    if (this.hasExplicitRngSeed && this.rngInstance) {
+      effectiveRng = () => this.rngInstance!.nextFloat();
+    } else if (this.rngInstance) {
+      this.rngInstance = pf.rng;
+      effectiveRng = () => this.rngInstance!.nextFloat();
+    } else {
+      effectiveRng = this.rng;
+    }
+
     // 骰子定門 (TAIWAN_WALL_OPENING_V1): the dealer rolls three dice before the
     // deal; the total determines the opening seat and the wall break point.
-    const dice = rollDice(this.rng);
-    this.state = createGameState(this.variant, this.rng, this.dealer, this.dealerStreak, dice.values);
+    const dice = rollDice(effectiveRng);
+    this.state = createGameState(this.variant, effectiveRng, this.dealer, this.dealerStreak, dice.values);
     // 莊家起手第 17 張視為本手「首張摸牌」：createGameState 的初始發牌不會設定
     // lastDrawnBy/lastDrawnTile，若不補上，客戶端在莊家首手（17 張）會無法以伺服器
     // 權威資料分離第 17 張（舊版 max-instanceId 啟發式會分錯張）。
@@ -333,6 +383,7 @@ export class Room implements RoomLike {
     this.kongDraw = false;
     this.breakdown = null;
     this.ledger = null;
+    this.provablyFairProof = null;
     // A fresh round also resets the operationId idempotency ledger — otherwise
     // every round would re-accumulate executed operationIds forever.
     this.executed.clear();
@@ -389,6 +440,16 @@ export class Room implements RoomLike {
       case "pass":
         result = this.doPass(seat as Seat);
         break;
+      case "set_client_seed": {
+        const newSeed = command.clientSeed.trim();
+        if (!newSeed || newSeed.length > 64) {
+          result = { ok: false, error: { code: "invalid_client_seed", message: "Client seed must be 1-64 characters" } };
+          break;
+        }
+        this.clientSeed = newSeed;
+        result = { ok: true };
+        break;
+      }
       default:
         result = { ok: false, error: { code: "not_allowed", message: "Command not allowed" } };
     }
@@ -798,6 +859,16 @@ export class Room implements RoomLike {
     for (const entry of this.ledger) {
       this.scores[entry.seat] = (this.scores[entry.seat] ?? 0) + entry.delta;
     }
+    if (this.serverSeed && this.serverSeedHash && this.activeDerivedSeed !== null) {
+      this.provablyFairProof = {
+        serverSeed: this.serverSeed,
+        serverSeedHash: this.serverSeedHash,
+        clientSeed: this.clientSeed,
+        nonce: this.handNonce,
+        derivedSeed: this.activeDerivedSeed,
+      };
+      this.serverSeed = null;
+    }
     this.status = "ended";
     this.state = state;
     this.clearAutoplay();
@@ -815,6 +886,16 @@ export class Room implements RoomLike {
       { seat: 2, delta: 0 },
       { seat: 3, delta: 0 },
     ];
+    if (this.serverSeed && this.serverSeedHash && this.activeDerivedSeed !== null) {
+      this.provablyFairProof = {
+        serverSeed: this.serverSeed,
+        serverSeedHash: this.serverSeedHash,
+        clientSeed: this.clientSeed,
+        nonce: this.handNonce,
+        derivedSeed: this.activeDerivedSeed,
+      };
+      this.serverSeed = null;
+    }
     // 流局: 莊家連莊 — the dealer keeps the seat and the streak advances.
     this.dealerStreak += 1;
     this.status = "ended";
@@ -983,6 +1064,11 @@ export class Room implements RoomLike {
         this.rngInstance?.getState() ??
         new SeededRng(seedFromString(this.id)).getState(),
       executed: [...this.executed.entries()],
+      serverSeed: this.serverSeed,
+      serverSeedHash: this.serverSeedHash,
+      clientSeed: this.clientSeed,
+      handNonce: this.handNonce,
+      provablyFairProof: this.provablyFairProof,
     };
   }
 
@@ -999,6 +1085,9 @@ export class Room implements RoomLike {
       pointPerFan: snapshot.pointPerFan,
       timeoutMs: snapshot.timeoutMs,
       rngState: snapshot.rngState,
+      clientSeed: snapshot.clientSeed,
+      serverSeed: snapshot.serverSeed ?? undefined,
+      handNonce: snapshot.handNonce,
       onChange: hooks.onChange,
       onMutation: hooks.onMutation,
     });
@@ -1015,6 +1104,11 @@ export class Room implements RoomLike {
     room.dealerStreak = snapshot.dealerStreak;
     room.autoplay = snapshot.autoplay;
     room.autoplayLog = snapshot.autoplayLog;
+    room.serverSeed = snapshot.serverSeed ?? null;
+    room.serverSeedHash = snapshot.serverSeedHash ?? null;
+    room.clientSeed = snapshot.clientSeed ?? room.clientSeed;
+    room.handNonce = snapshot.handNonce ?? 0;
+    room.provablyFairProof = snapshot.provablyFairProof ?? null;
     room.executed.clear();
     for (const [op, fp] of snapshot.executed) room.executed.set(op, fp);
     // After a restart every socket is gone — mark seats offline. The room
@@ -1068,4 +1162,9 @@ export interface RoomSnapshot {
   rngState: number;
   /** [operationId, content fingerprint] pairs — durable command dedup. */
   executed: Array<[string, string]>;
+  serverSeed?: string | null;
+  serverSeedHash?: string | null;
+  clientSeed?: string;
+  handNonce?: number;
+  provablyFairProof?: ProvablyFairProof | null;
 }

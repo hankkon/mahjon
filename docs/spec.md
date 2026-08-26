@@ -238,4 +238,22 @@ bearer credential `v1.<generation>.<expiresAt>.<sig>` bound to
   JSON line after binding (for Docker/PM2 supervisors).
 - Server-side socket heartbeat pings and terminates unresponsive sockets
   (`HEARTBEAT_INTERVAL_MS`, default 30s).
+- Background cleanup scheduler periodically purges abandoned/empty rooms
+  (`CLEANUP_INTERVAL_MS`, default 5min).
+
+### 5.5 Provably Fair Verification (Stake-Compliant 可證明公平性機制)
+
+To ensure tamper-proof fairness and mathematical verifiability for every round:
+1. **Server Seed (伺服器種子)**: Generated as a 256-bit CSPRNG hex string by the server.
+2. **Server Seed Hash Commitment (承諾哈希)**: Before any hand begins, the server calculates and broadcasts `serverSeedHash = SHA256(serverSeed)` in the pre-game snapshot. The server cannot modify the secret seed after players join or see their tiles.
+3. **Client Seed (客戶端種子)**: Provided by the players/room (customizable via `set_client_seed` command or CSPRNG generated).
+4. **Nonce (局號序號)**: Monotonically increments per hand (`1`, `2`, `3`...).
+5. **Deterministic Derivation**: The PRNG seed driving the deal and dice roll is derived via HMAC-SHA256:
+   ```ts
+   derivedSeed = HMAC_SHA256(key = serverSeed, data = `${clientSeed}:${nonce}`)
+   ```
+6. **Post-Game Reveal & Audit (開牌驗證)**:
+   Upon hand conclusion (`game.ended` / settlement), the server reveals plaintext `serverSeed`. Any client or third-party auditor can verify:
+   - `SHA256(serverSeed) === serverSeedHash` (guarantees no mid-game seed tampering).
+   - Replaying `createProvablyFairRng(serverSeed, clientSeed, nonce)` reproduces the exact same tile wall, dice roll, and draw order.
 

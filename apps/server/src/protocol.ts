@@ -18,7 +18,15 @@ export const PROTOCOL_VERSION = "1.0.0";
 // Commands (Client → Server)
 // ---------------------------------------------------------------------------
 
-export type CommandType = "create" | "join" | "ready" | "discard" | "reaction" | "pass" | "ping";
+export type CommandType =
+  | "create"
+  | "join"
+  | "ready"
+  | "discard"
+  | "reaction"
+  | "pass"
+  | "set_client_seed"
+  | "ping";
 
 export interface CommandBase {
   type: CommandType;
@@ -77,6 +85,11 @@ export interface ReactionCommand extends CommandBase {
   pengMeldId?: number;
 }
 
+export interface SetClientSeedCommand extends CommandBase {
+  type: "set_client_seed";
+  clientSeed: string;
+}
+
 export type ClientCommand =
   | CreateCommand
   | JoinCommand
@@ -84,6 +97,7 @@ export type ClientCommand =
   | PassCommand
   | DiscardCommand
   | ReactionCommand
+  | SetClientSeedCommand
   | PingCommand;
 
 // ---------------------------------------------------------------------------
@@ -217,6 +231,12 @@ export function validateClientCommand(raw: unknown): CommandValidationResult {
         return { ok: false, code: "bad_command", message: "Invalid pengMeldId (must be non-negative integer)" };
       }
       return { ok: true, command: o as unknown as ReactionCommand };
+    }
+    case "set_client_seed": {
+      if (typeof o.clientSeed !== "string" || o.clientSeed.trim().length === 0 || o.clientSeed.length > 64) {
+        return { ok: false, code: "bad_command", message: "Invalid clientSeed (must be non-empty string <= 64 chars)" };
+      }
+      return { ok: true, command: o as unknown as SetClientSeedCommand };
     }
     default:
       return { ok: false, code: "bad_command", message: `Unknown command type: ${String(o.type)}` };
