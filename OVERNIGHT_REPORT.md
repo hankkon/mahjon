@@ -29,6 +29,8 @@
   - 測試檔：[`apps/server/src/__tests__/p0-spec-compliance.test.ts`](file:///Users/ian/Desktop/taiwan-mahjong1/apps/server/src/__tests__/p0-spec-compliance.test.ts), [`apps/server/src/__tests__/persistence.test.ts`](file:///Users/ian/Desktop/taiwan-mahjong1/apps/server/src/__tests__/persistence.test.ts)
 - [x] **P0-J**: 門清一摸三鎖定 3 台 — 自摸且無副露時給予門清一摸三 (3 台)，互斥排除自摸(1)+門清(1)。
   - 測試檔：[`apps/server/src/__tests__/p0-spec-compliance.test.ts`](file:///Users/ian/Desktop/taiwan-mahjong1/apps/server/src/__tests__/p0-spec-compliance.test.ts), [`packages/rules/src/__tests__/scoring.test.ts`](file:///Users/ian/Desktop/taiwan-mahjong1/packages/rules/src/__tests__/scoring.test.ts)
+- [x] **P0-K**: Stake-Compliant Provably Fair (可證明公平性) 種子序與承諾驗證機制 — 256-bit CSPRNG 秘密伺服器種子 + SHA-256 承諾廣播 + HMAC-SHA256 確定性每局衍生 + 結算開牌驗證與 100% 牌局重放。
+  - 測試檔：[`packages/rules/src/__tests__/provably-fair.test.ts`](file:///Users/ian/Desktop/taiwan-mahjong1/packages/rules/src/__tests__/provably-fair.test.ts), [`apps/server/src/__tests__/provably-fair-server.test.ts`](file:///Users/ian/Desktop/taiwan-mahjong1/apps/server/src/__tests__/provably-fair-server.test.ts)
 - [x] **P1**: 領域規則對齊規格 — 吃碰槓領域契約、標準 5 組+將、八對子（7對+1刻=17張）、骰子定門 (`TAIWAN_WALL_OPENING_V1`)、連續補花 (`IMMEDIATE_TAIL_CHAIN_V1`)。
 - [x] **P2**: 房間狀態機 — 過水獨立維護、優先序 胡 > 槓/碰 > 吃、逾時摸切/過牌、Client-Safe Snapshot 遮蔽、SQLite WAL 單實例持久化與重啟 RNG 重放。
   - 測試檔：[`apps/server/src/__tests__/persistence.test.ts`](file:///Users/ian/Desktop/taiwan-mahjong1/apps/server/src/__tests__/persistence.test.ts)
@@ -44,16 +46,39 @@
 ---
 
 ## Tests after（N pass / 0 fail）
-- **TypeScript / Vitest**: **15 passed / 15 test files** (**256 passed / 0 failed**, 1.3s)
+- **TypeScript / Vitest**: **17 passed / 17 test files** (**264 passed / 0 failed**, 1.4s)
 - **Typecheck**: `pnpm typecheck` **0 errors**
 - **Build**: `pnpm build` **0 errors**
 - **Godot Headless QA**: **58 passed / 0 failed**
-- **1,000-Hand Autonomous AI Self-Play Benchmark**:
-  - **總耗時**: 134.3 秒 (**7.4 局/秒**)
-  - **總局數**: 1,000 局 (962 勝 / 38 流局)
-  - **零和性違規**: **0 次 (PASS - sum(delta) === 0)**
-  - **牌山張數違規**: **0 次 (PASS - 144 張恆等式)**
-  - **AI 勝率**: 初級 0.5% vs 中級 23.1% vs 高級 72.6% (證明向聽數與防守演算法發揮效果)
+- **10,000-Hand (一萬局) 大規模 AI 自我對弈與全牌型不變式基準測試**:
+  - **總耗時**: 1305.17 秒 (**7.7 局/秒**)
+  - **總局數**: 10,000 局 (9,657 勝 [96.57%] / 343 流局 [3.43%])
+  - **平均每局回合數**: 56.2 回合 (總計約 562,000 步決策)
+  - **最高連莊**: 連 11 莊
+  - **零和性違規**: **0 次 (PASS - 10,000 局 100% sum(delta) === 0)**
+  - **牌山張數違規**: **0 次 (PASS - 562,000 步 100% 144 張守恆)**
+  - **可證明公平性違規**: **0 次 (PASS - 10,000 局 100% SHA256/HMAC 承諾開牌驗證通過)**
+  - **AI 勝率表現**: 初級 0.88% (88勝) vs 中級 23.37% (2,337勝) vs 高級 72.32% (7,232勝)
+  - **完整役種與特殊罕見牌型統計 (9,657 次胡牌)**:
+    - 花牌: 3,210 次 (33.24%)
+    - 自摸: 1,986 次 (20.57%)
+    - 坎張: 1,693 次 (17.53%)
+    - 莊家連莊台: 1,116 次 (11.56%)
+    - 邊張: 1,054 次 (10.91%)
+    - 門清: 587 次 (6.08%)
+    - 單吊: 483 次 (5.00%)
+    - 門清一摸三: 172 次 (1.78%)
+    - 平胡: 169 次 (1.75%)
+    - 全求人: 128 次 (1.33%)
+    - 三暗刻: 64 次 (0.66%)
+    - 槓上開花: 25 次 (0.26%)
+    - 河底撈魚: 22 次 (0.23%)
+    - 碰碰胡: 16 次 (0.17%)
+    - 搶槓: 16 次 (0.17%)
+    - 混一色: 11 次 (0.11%)
+    - 海底撈月: 6 次 (0.06%)
+    - 大三元: 1 次 (0.01%)
+    - 四暗刻: 1 次 (0.01%)
 
 ---
 
@@ -73,9 +98,9 @@ pnpm typecheck
 pnpm build
 ```
 
-### 2. 執行 1,000 局高並發 AI 自我對弈基準測試
+### 2. 執行高並發 AI 自我對弈基準測試 (支援自訂局數，如 100, 1000, 10000)
 ```bash
-pnpm benchmark 1000
+pnpm benchmark 10000
 ```
 
 ### 3. 執行 Godot 客戶端渲染 QA 檢查

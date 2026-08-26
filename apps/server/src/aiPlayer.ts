@@ -180,11 +180,23 @@ function pickSabotageTile(hand: readonly TileInstance[]): TileInstance | undefin
  *  0 = Tenpai (聽牌)
  *  1 = 1-Shanten (一向聽), etc.
  */
+const shantenCache = new Map<string, number>();
+const decompCache = new Map<string, Array<{ melds: number; taatsu: number; pairs: number }>>();
+
 export function calculateShanten(
   hand: readonly TileInstance[],
   melds: readonly Meld[] = [],
 ): number {
   const counts = handCounts(hand);
+
+  // Fast cache lookup
+  let cacheKey = `${melds.length}|`;
+  for (const [id, count] of counts) {
+    if (count > 0) cacheKey += `${id}:${count};`;
+  }
+  const cached = shantenCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
   const openMeldCount = melds.length;
   const targetMelds = 5 - openMeldCount;
 
@@ -227,6 +239,10 @@ export function calculateShanten(
 
   // Decompose numbered suit into candidate melds & partial melds
   function decomposeSuit(arr: number[]): Array<{ melds: number; taatsu: number; pairs: number }> {
+    const key = arr.join(",");
+    const hit = decompCache.get(key);
+    if (hit) return hit;
+
     const results: Array<{ melds: number; taatsu: number; pairs: number }> = [];
 
     function search(idx: number, m: number, t: number, p: number, currentArr: number[]) {
@@ -287,6 +303,8 @@ export function calculateShanten(
     }
 
     search(1, 0, 0, 0, [...arr]);
+    if (decompCache.size > 2000) decompCache.clear();
+    decompCache.set(key, results);
     return results;
   }
 
@@ -324,7 +342,10 @@ export function calculateShanten(
     }
   }
 
-  return Math.min(minStandardShanten, eightPairShanten);
+  const result = Math.min(minStandardShanten, eightPairShanten);
+  if (shantenCache.size > 30000) shantenCache.clear();
+  shantenCache.set(cacheKey, result);
+  return result;
 }
 
 function countUnseen(

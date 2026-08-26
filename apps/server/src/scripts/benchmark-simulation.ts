@@ -11,7 +11,7 @@
 
 import { Room } from "../room.js";
 import { decideDiscard, decideReaction, type AiDifficulty } from "../aiPlayer.js";
-import { accountedGameStateTiles } from "@taiwan-mahjong/rules";
+import { accountedGameStateTiles, verifyProvablyFairProof } from "@taiwan-mahjong/rules";
 
 interface BenchmarkStats {
   totalHands: number;
@@ -23,6 +23,7 @@ interface BenchmarkStats {
   totalTurns: number;
   zeroSumViolations: number;
   tileAccountViolations: number;
+  provablyFairViolations: number;
   fanDistribution: Record<string, number>;
   startTime: number;
   endTime: number;
@@ -43,6 +44,7 @@ export function runBenchmark(
     totalTurns: 0,
     zeroSumViolations: 0,
     tileAccountViolations: 0,
+    provablyFairViolations: 0,
     fanDistribution: {},
     startTime: Date.now(),
     endTime: 0,
@@ -62,6 +64,8 @@ export function runBenchmark(
   function nextOp(): string {
     return `bench-op-${++opCounter}`;
   }
+
+  const logInterval = targetHands >= 5000 ? 1000 : targetHands >= 1000 ? 500 : 100;
 
   for (let handIdx = 0; handIdx < targetHands; handIdx++) {
     // 1. Ready all players
@@ -174,6 +178,27 @@ export function runBenchmark(
         stats.zeroSumViolations++;
       }
     }
+
+    // Stake Provably Fair verification
+    if (room.provablyFairProof) {
+      const audit = verifyProvablyFairProof(room.provablyFairProof);
+      if (!audit.valid) {
+        stats.provablyFairViolations++;
+      }
+    }
+
+    // Periodic milestone progress log
+    if ((handIdx + 1) % logInterval === 0 || handIdx + 1 === targetHands) {
+      const elapsedSec = ((Date.now() - stats.startTime) / 1000).toFixed(1);
+      const currentRate = ((handIdx + 1) / Number(elapsedSec)).toFixed(1);
+      const pct = (((handIdx + 1) / targetHands) * 100).toFixed(1);
+      console.log(
+        `  [進度 ${String(handIdx + 1).padStart(5)} / ${targetHands} (${pct.padStart(5)}%)] ` +
+        `耗時: ${elapsedSec.padStart(5)}s (${currentRate.padStart(4)} 局/秒) | ` +
+        `勝率: 初${stats.winsBySeat[0]} 中${stats.winsBySeat[1]} 高${stats.winsBySeat[2] + stats.winsBySeat[3]} | ` +
+        `違規: 零和${stats.zeroSumViolations} 牌山${stats.tileAccountViolations} PF${stats.provablyFairViolations}`
+      );
+    }
   }
 
   stats.endTime = Date.now();
@@ -197,7 +222,7 @@ if (process.argv[1]?.endsWith("benchmark-simulation.ts") || process.argv[1]?.end
   const durationSec = ((results.endTime - results.startTime) / 1000).toFixed(2);
   const handsPerSec = (results.totalHands / Number(durationSec)).toFixed(1);
 
-  console.log(`測試完成！`);
+  console.log(`\n測試完成！`);
   console.log(`------------------------------------------------------`);
   console.log(`總耗時: ${durationSec} 秒 (${handsPerSec} 局/秒)`);
   console.log(`總局數: ${results.totalHands}`);
@@ -207,23 +232,25 @@ if (process.argv[1]?.endsWith("benchmark-simulation.ts") || process.argv[1]?.end
   console.log(`最高連莊次數: 連 ${results.maxStreak}`);
   console.log(`------------------------------------------------------`);
   console.log(`勝率統計 (按 AI 難度):`);
-  console.log(`  - AI 初級 (Seat 0): ${results.winsBySeat[0]} 勝 (${((results.winsBySeat[0] / results.totalHands) * 100).toFixed(1)}%)`);
-  console.log(`  - AI 中級 (Seat 1): ${results.winsBySeat[1]} 勝 (${((results.winsBySeat[1] / results.totalHands) * 100).toFixed(1)}%)`);
-  console.log(`  - AI 高級 (Seat 2): ${results.winsBySeat[2]} 勝 (${((results.winsBySeat[2] / results.totalHands) * 100).toFixed(1)}%)`);
-  console.log(`  - AI 高級 (Seat 3): ${results.winsBySeat[3]} 勝 (${((results.winsBySeat[3] / results.totalHands) * 100).toFixed(1)}%)`);
+  console.log(`  - AI 初級 (Seat 0): ${results.winsBySeat[0]} 勝 (${((results.winsBySeat[0] / results.totalHands) * 100).toFixed(2)}%)`);
+  console.log(`  - AI 中級 (Seat 1): ${results.winsBySeat[1]} 勝 (${((results.winsBySeat[1] / results.totalHands) * 100).toFixed(2)}%)`);
+  console.log(`  - AI 高級 (Seat 2): ${results.winsBySeat[2]} 勝 (${((results.winsBySeat[2] / results.totalHands) * 100).toFixed(2)}%)`);
+  console.log(`  - AI 高級 (Seat 3): ${results.winsBySeat[3]} 勝 (${((results.winsBySeat[3] / results.totalHands) * 100).toFixed(2)}%)`);
   console.log(`------------------------------------------------------`);
-  console.log(`常見役種出現次數:`);
+  console.log(`完整役種與特殊牌型出現統計:`);
   const sortedFans = Object.entries(results.fanDistribution).sort((a, b) => b[1] - a[1]);
-  for (const [rule, count] of sortedFans.slice(0, 10)) {
-    console.log(`  - ${rule.padEnd(10, " ")}: ${count} 次`);
+  for (const [rule, count] of sortedFans) {
+    const rate = ((count / results.wins) * 100).toFixed(2);
+    console.log(`  - ${rule.padEnd(14, " ")}: ${String(count).padStart(5)} 次 (${rate.padStart(5)}%)`);
   }
   console.log(`------------------------------------------------------`);
   console.log(`不變式驗證:`);
   console.log(`  - 零和性違規 (sum(delta) !== 0): ${results.zeroSumViolations} (PASS)`);
   console.log(`  - 牌山張數違規 (tiles !== 144):  ${results.tileAccountViolations} (PASS)`);
+  console.log(`  - 可證明公平性 (Provably Fair):  ${results.provablyFairViolations} (PASS)`);
   console.log(`======================================================\n`);
 
-  if (results.zeroSumViolations > 0 || results.tileAccountViolations > 0) {
+  if (results.zeroSumViolations > 0 || results.tileAccountViolations > 0 || results.provablyFairViolations > 0) {
     process.exit(1);
   }
 }

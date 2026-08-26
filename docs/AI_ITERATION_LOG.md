@@ -25,7 +25,12 @@
   - `pnpm test`：**264/264 PASS**（17 個測試檔案全數通過）
   - `pnpm typecheck`：**Done**（零型別錯誤）
   - `pnpm build`：**Done**（編譯成功）
-  - `pnpm benchmark 100`：**100 局完成 (14.0s, 7.1 局/秒)**（零和性與牌山 0 違規）
+  - `pnpm benchmark 10000`：**10,000 局 (一萬局) 完成 (1305.2s, 7.7 局/秒)**
+    - 零和性違規 (`sum(delta) !== 0`)：**0 次 (PASS)**
+    - 牌山張數違規 (`accountedGameStateTiles !== 144`)：**0 次 (PASS)**
+    - 可證明公平性違規 (`Provably Fair Proof Audit`)：**0 次 (PASS)**
+    - AI 勝率表現：初級 0.88% (88勝) vs 中級 23.37% (2,337勝) vs 高級 72.32% (7,232勝)
+    - 稀有特殊役種成功觸發：大三元(1次)、四暗刻(1次)、混一色(11次)、搶槓(16次)、碰碰胡(16次)、河底撈魚(22次)、槓上開花(25次)、海底撈月(6次)
   - Godot Headless QA Check (`qa_render_check.tscn`)：**PASS 58 / FAIL 0**
 
 ---
