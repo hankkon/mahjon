@@ -100,3 +100,17 @@ export function declareWin(state: GameState, winner: Seat, selfDraw: boolean): G
 export function meldsAt(state: GameState, seat: Seat): Meld[] {
   return state.melds[seat];
 }
+
+/** Total tiles accounted for across hands, flowers, open melds, discards, and remaining wall. */
+export function accountedGameStateTiles(state: GameState): number {
+  const inHands = state.wall.hands.reduce((acc, h) => acc + h.length, 0);
+  const inFlowers = state.wall.flowers.reduce((acc, f) => acc + f.length, 0);
+  const inMelds = state.melds.reduce(
+    (acc, ms) => acc + ms.reduce((macc, m) => macc + m.tiles.length, 0),
+    0,
+  );
+  const inDiscards = state.discards.length;
+  const inWallHead = Math.max(0, state.wall.tailStart - state.wall.headCursor);
+  const inWallDeck = Math.max(0, state.wall.wall.length - state.wall.deckCursor);
+  return inHands + inFlowers + inMelds + inDiscards + inWallHead + inWallDeck;
+}

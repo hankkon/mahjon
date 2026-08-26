@@ -23,6 +23,7 @@ import type { GameState, Meld, TileInstance, ChiMeld, PengMeld } from "@taiwan-m
 import {
   chiOptions,
   detectWin,
+  headRemaining,
   kongOptions,
   pengOptions,
   tileToId,
@@ -330,19 +331,27 @@ function countUnseen(
   tid: string,
   hand: readonly TileInstance[],
   melds: readonly Meld[],
-  discards: readonly TileInstance[],
+  discards: readonly TileInstance[] | readonly (readonly TileInstance[])[],
 ): number {
   let seen = 0;
   for (const t of hand) {
-    if (tileToId(t.tile) === tid) seen++;
+    if (t?.tile && tileToId(t.tile) === tid) seen++;
   }
   for (const m of melds) {
-    for (const t of m.tiles) {
-      if (tileToId(t.tile) === tid) seen++;
+    if (m?.tiles) {
+      for (const t of m.tiles) {
+        if (t?.tile && tileToId(t.tile) === tid) seen++;
+      }
     }
   }
-  for (const t of discards) {
-    if (tileToId(t.tile) === tid) seen++;
+  for (const d of discards) {
+    if (Array.isArray(d)) {
+      for (const t of d) {
+        if (t?.tile && tileToId(t.tile) === tid) seen++;
+      }
+    } else if ((d as TileInstance)?.tile) {
+      if (tileToId((d as TileInstance).tile) === tid) seen++;
+    }
   }
   return Math.max(0, 4 - seen);
 }
@@ -411,10 +420,7 @@ export function decideDiscard(
   const melds = (state.melds[seat] as Meld[]) ?? [];
 
   // Collect visible discards for defensive and acceptance accuracy
-  const allDiscards: TileInstance[] = [];
-  for (const dList of state.discards) {
-    if (Array.isArray(dList)) allDiscards.push(...dList);
-  }
+  const allDiscards: readonly TileInstance[] = state.discards ?? [];
 
   let target: TileInstance | undefined;
 
@@ -453,8 +459,9 @@ export function decideDiscard(
     let bestAcceptance = -1;
     let bestTieScore = Number.NEGATIVE_INFINITY;
 
-    const remainingWall = deckRemaining(state.wall);
-    const isLateGame = remainingWall <= 24;
+    const remainingWall = headRemaining(state.wall);
+    const hasThreat = state.melds.some((m, idx) => idx !== seat && m.length >= 3);
+    const isLateGame = remainingWall <= 20 || hasThreat;
 
     for (const candidate of hand) {
       const rest = hand.filter((t) => t.instanceId !== candidate.instanceId);
@@ -465,9 +472,18 @@ export function decideDiscard(
       const shapeScore = -tileValue(cid, handCounts(rest));
       let defenseScore = 0;
       if (isLateGame) {
-        // Discarding a tile that's already seen in discards is safe
-        const timesSeen = allDiscards.filter((d) => tileToId(d.tile) === cid).length;
-        defenseScore = timesSeen * 2;
+        // Discarding a tile that's already seen in discards is safe (現物)
+        let timesSeen = 0;
+        for (const d of allDiscards) {
+          if (Array.isArray(d)) {
+            for (const t of d) {
+              if (t?.tile && tileToId(t.tile) === cid) timesSeen++;
+            }
+          } else if ((d as TileInstance)?.tile && tileToId((d as TileInstance).tile) === cid) {
+            timesSeen++;
+          }
+        }
+        defenseScore = timesSeen * 3;
       }
 
       const totalTieScore = shapeScore + defenseScore;

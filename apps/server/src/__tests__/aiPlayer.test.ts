@@ -115,10 +115,11 @@ describe("aiPlayer — 向聽數 (Shanten) 與 牌效 (Tile Acceptance)", () => 
           wall: new Array(50).fill({ instanceId: 0, tile: { kind: "numbered", suit: "wan", rank: 1 } }),
           deckCursor: 0,
           headCursor: 0,
-          tailCursor: 0,
+          tailStart: 50,
         },
         melds: [[], [], [], []],
-        discards: [[], [], [], []],
+        discards: [],
+        discardsBySeat: [[], [], [], []],
       },
     };
 

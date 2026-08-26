@@ -48,6 +48,12 @@
 - **Typecheck**: `pnpm typecheck` **0 errors**
 - **Build**: `pnpm build` **0 errors**
 - **Godot Headless QA**: **58 passed / 0 failed**
+- **1,000-Hand Autonomous AI Self-Play Benchmark**:
+  - **總耗時**: 134.3 秒 (**7.4 局/秒**)
+  - **總局數**: 1,000 局 (962 勝 / 38 流局)
+  - **零和性違規**: **0 次 (PASS - sum(delta) === 0)**
+  - **牌山張數違規**: **0 次 (PASS - 144 張恆等式)**
+  - **AI 勝率**: 初級 0.5% vs 中級 23.1% vs 高級 72.6% (證明向聽數與防守演算法發揮效果)
 
 ---
 
@@ -67,12 +73,17 @@ pnpm typecheck
 pnpm build
 ```
 
-### 2. 執行 Godot 客戶端渲染 QA 檢查
+### 2. 執行 1,000 局高並發 AI 自我對弈基準測試
+```bash
+pnpm benchmark 1000
+```
+
+### 3. 執行 Godot 客戶端渲染 QA 檢查
 ```bash
 /Users/ian/Downloads/Godot.app/Contents/MacOS/Godot --headless --path apps/player-client res://qa_render_check.tscn
 ```
 
-### 3. 本地啟動伺服器
+### 4. 本地啟動伺服器
 ```bash
 pnpm dev
 # 或啟動帶 Web Client 的靜態服務

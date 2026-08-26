@@ -15,7 +15,8 @@
     "start": "node dist/apps/server/src/serve-web.js",
     "dev": "tsx watch src/serve.ts",
     "dev:web": "tsx watch src/serve-web.ts",
-    "simulate": "node dist/apps/server/src/scripts/simulate-match.js"
+    "simulate": "node dist/apps/server/src/scripts/simulate-match.js",
+    "benchmark": "tsx src/scripts/benchmark-simulation.ts"
   },
   "dependencies": {
     "@taiwan-mahjong/rules": "workspace:*",

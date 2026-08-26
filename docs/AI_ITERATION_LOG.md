@@ -1,7 +1,34 @@
 # AI 自主迭代紀錄 (AI Iteration Log)
 
-- **執行日期**：2026-08-25
-- **工作範圍**：P0-A ~ P0-J 規格對齊與回歸測試、算台與結算時序優化、多局分數累積、一砲多響/搶槓零和性證明、OVERNIGHT_REPORT 產出
+- **執行日期**：2026-08-26
+- **工作範圍**：向聽數與牌效啟發式 AI 決策引擎防守增強、伺服器定時房間清理排程、/health 指標強化、1,000 局高並發自我對弈基準測試與不變式證明
+
+---
+
+## 輪次 12：向聽數防守強化、房間自動清理排程、1,000 局自我對弈基準測試
+
+- **問題**：
+  1. `RoomManager.cleanup()` 需外部呼叫，缺乏背景週期性清理排程（長期運作可能累積廢棄房間）。
+  2. `aiPlayer.ts` 中 `allDiscards` 收集有誤（誤將 flat array 判斷為 2D array），且 `deckRemaining` 與 `headRemaining` 混用，導致防守決策與棄牌池現物判斷失真。
+  3. 缺乏一鍵執行 1,000 局大規模 AI 自我對弈並自動驗證零和性與 144 張牌山恆等式的基準測試工具。
+
+- **修改檔案**：
+  - `apps/server/src/index.ts` & `config.ts`（新增 `cleanupIntervalMs` 背景排程與 `/health` playingRooms/totalCleanedRooms 指標）
+  - `apps/server/src/aiPlayer.ts`（修復 `allDiscards` 收集、使用 `headRemaining` 判定殘壁防守、強化現物安牌 defenseScore、使 `countUnseen` 支援各種輸入形狀）
+  - `packages/rules/src/game.ts`（新增並導出 `accountedGameStateTiles`，精確計算對局中 hands+flowers+melds+discards+wall 的 144/136 張恆等式）
+  - `apps/server/src/scripts/benchmark-simulation.ts`（全新 1,000 局高速自我對弈基準測試腳本，支援勝率統計、役種頻率與不變式檢查）
+  - `apps/server/package.json` & `package.json`（新增 `pnpm benchmark` 指令）
+  - `OVERNIGHT_REPORT.md`（更新 1,000 局測試數據）
+
+- **驗證結果**：
+  - `pnpm benchmark 1000`：**1,000 局完成 (134.3s, 7.4 局/秒)**
+    - 零和性違規 (`sum(delta) !== 0`)：**0 次** (PASS)
+    - 牌山張數違規 (`accountedGameStateTiles !== 144`)：**0 次** (PASS)
+    - AI 勝率表現：初級 0.5% vs 中級 23.1% vs 高級 72.6% (勝率隨難度梯度分明)
+  - `pnpm test`：**256/256 PASS**（15 個測試檔案全數通過）
+  - `pnpm typecheck`：**Done**（零型別錯誤）
+  - `pnpm build`：**Done**（編譯成功）
+  - Godot Headless QA Check (`qa_render_check.tscn`)：**PASS 58 / FAIL 0**
 
 ---
 

@@ -15,6 +15,7 @@ export interface ServerEnvConfig {
   sqlitePath: string | undefined;
   seatCredentialSecret: string | undefined;
   heartbeatIntervalMs: number;
+  cleanupIntervalMs: number;
 }
 
 /**
@@ -38,5 +39,6 @@ export function loadServerConfig(
     sqlitePath: env.SQLITE_PATH ? env.SQLITE_PATH : undefined,
     seatCredentialSecret: env.SEAT_CREDENTIAL_SECRET ? env.SEAT_CREDENTIAL_SECRET : undefined,
     heartbeatIntervalMs: Number(env.HEARTBEAT_INTERVAL_MS ?? 30_000),
+    cleanupIntervalMs: Number(env.CLEANUP_INTERVAL_MS ?? 300_000),
   };
 }

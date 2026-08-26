@@ -51,6 +51,8 @@ export interface ServerConfig {
   seatCredentialSecret?: string;
   /** Server-side socket heartbeat ping interval (ms; <=0 disables). */
   heartbeatIntervalMs?: number;
+  /** Background cleanup interval for empty/ended rooms in ms (default 300,000ms = 5min; <=0 disables). */
+  cleanupIntervalMs?: number;
   /** Max WebSocket payload size in bytes (default 64KB). */
   maxPayloadBytes?: number;
   /** Max commands allowed per connection per rate limit window (default 50). */
@@ -132,15 +134,33 @@ export async function startServer(config: ServerConfig = {}): Promise<RunningSer
   } = config;
 
   const startedAt = new Date().toISOString();
+  let totalCleanedRooms = 0;
   const repository: RoomRepository | null = config.sqlitePath
     ? new SqliteRoomRepository(config.sqlitePath)
     : null;
   const manager = new RoomManager({ roomOptions: { variant, timeoutMs }, repository: repository ?? undefined });
+
+  // Periodic background room cleanup (removes empty rooms with no active players)
+  const cleanupIntervalMs = config.cleanupIntervalMs ?? 300_000;
+  let cleanupTimer: NodeJS.Timeout | null = null;
+  if (cleanupIntervalMs > 0) {
+    cleanupTimer = setInterval(() => {
+      const removed = manager.cleanup();
+      if (removed.length > 0) {
+        totalCleanedRooms += removed.length;
+      }
+    }, cleanupIntervalMs);
+  }
+
   const httpServer = createServer((req, res) => {
     if (req.url === "/health" || req.url === "/healthz") {
       const mem = process.memoryUsage();
       let executedEstimate = 0;
-      for (const room of manager.rooms.values()) executedEstimate += room.executedSize;
+      let playingRooms = 0;
+      for (const room of manager.rooms.values()) {
+        executedEstimate += room.executedSize;
+        if (room.status === "playing") playingRooms++;
+      }
       res.writeHead(200, { "content-type": "application/json" });
       res.end(
         JSON.stringify({
@@ -153,6 +173,8 @@ export async function startServer(config: ServerConfig = {}): Promise<RunningSer
           memory: { rss: mem.rss, heapUsed: mem.heapUsed, heapTotal: mem.heapTotal, external: mem.external },
           sockets: games.socketCount,
           rooms: manager.rooms.size,
+          playingRooms,
+          totalCleanedRooms,
           executedEstimate,
         }),
       );
@@ -194,6 +216,10 @@ export async function startServer(config: ServerConfig = {}): Promise<RunningSer
   });
 
   const stop = async (): Promise<void> => {
+    if (cleanupTimer) {
+      clearInterval(cleanupTimer);
+      cleanupTimer = null;
+    }
     ai?.stop();
     await games.close();
     await new Promise<void>((resolve) => httpServer.close(() => resolve()));

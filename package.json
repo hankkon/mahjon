@@ -15,6 +15,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "pnpm -r run typecheck",
+    "benchmark": "pnpm --filter @taiwan-mahjong/server benchmark",
     "pack:core": "node tools/pack-core.mjs",
     "pack:repo": "node tools/pack-repo.mjs",
     "pack:zip": "python3 tools/pack_zip.py",
