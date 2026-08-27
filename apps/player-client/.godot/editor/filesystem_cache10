@@ -53,10 +53,10 @@ wan_9.png::CompressedTexture2D::3028933897169070646::1786694432::1786726290::1::
 west.png::CompressedTexture2D::9004800626172560328::1786694520::1786726290::1::::<><><>0<>0<>2894e9a3b9b5d6260a6802a1322c3615<>res://.godot/imported/west.png-46be47f629eee1a579aa5e35e4889f62.ctex::
 white.png::CompressedTexture2D::6515328972465605206::1786694529::1786726290::1::::<><><>0<>0<>6bfc29bea34d7ba96dab64b562cf5cbe<>res://.godot/imported/white.png-d548b7042b2008f37527879328e7100d.ctex::
 ::res://export/::1786463477
-::res://export/web/::1787847249
-index.apple-touch-icon.png::CompressedTexture2D::8693915069269311704::1787847249::1786466060::1::::<><><>0<>0<>143c2cc3dea71b9f2e15c6a46e75d27e<>res://.godot/imported/index.apple-touch-icon.png-aebfb1e41ce4a993e231d731c37e24be.ctex::
-index.icon.png::CompressedTexture2D::3442684018609634988::1787847249::1786466060::1::::<><><>0<>0<>ad39e36b7fba93d02970c2ab92bc6fae<>res://.godot/imported/index.icon.png-71c9d3338695ba24c45c706011eaad77.ctex::
-index.png::CompressedTexture2D::5587092318746845746::1787847249::1786466060::1::::<><><>0<>0<>2ec6f0c8fd3d596eefaea956afbbbbfa<>res://.godot/imported/index.png-c2d8175aa2006ac735a751c5803e019d.ctex::
+::res://export/web/::1787847450
+index.apple-touch-icon.png::CompressedTexture2D::8693915069269311704::1787847450::1786466060::1::::<><><>0<>0<>143c2cc3dea71b9f2e15c6a46e75d27e<>res://.godot/imported/index.apple-touch-icon.png-aebfb1e41ce4a993e231d731c37e24be.ctex::
+index.icon.png::CompressedTexture2D::3442684018609634988::1787847450::1786466060::1::::<><><>0<>0<>ad39e36b7fba93d02970c2ab92bc6fae<>res://.godot/imported/index.icon.png-71c9d3338695ba24c45c706011eaad77.ctex::
+index.png::CompressedTexture2D::5587092318746845746::1787847450::1786466060::1::::<><><>0<>0<>2ec6f0c8fd3d596eefaea956afbbbbfa<>res://.godot/imported/index.png-c2d8175aa2006ac735a751c5803e019d.ctex::
 ::res://scenes/::1786437876
 Main.tscn::PackedScene::-1::1787814042::0::1::::<><><>0<>0<><>::res://scripts/main.gd
 Table.tscn::PackedScene::-1::1787243787::0::1::::<><><>0<>0<><>::res://scripts/table.gd<>res://scripts/ui/RiverView.gd<>res://scripts/ui/SettlementView.gd
