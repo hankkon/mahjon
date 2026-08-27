@@ -31,6 +31,9 @@
   - 測試檔：[`apps/server/src/__tests__/p0-spec-compliance.test.ts`](file:///Users/ian/Desktop/taiwan-mahjong1/apps/server/src/__tests__/p0-spec-compliance.test.ts), [`packages/rules/src/__tests__/scoring.test.ts`](file:///Users/ian/Desktop/taiwan-mahjong1/packages/rules/src/__tests__/scoring.test.ts)
 - [x] **P0-K**: Stake-Compliant Provably Fair (可證明公平性) 種子序與承諾驗證機制 — 256-bit CSPRNG 秘密伺服器種子 + SHA-256 承諾廣播 + HMAC-SHA256 確定性每局衍生 + 結算開牌驗證與 100% 牌局重放。
   - 測試檔：[`packages/rules/src/__tests__/provably-fair.test.ts`](file:///Users/ian/Desktop/taiwan-mahjong1/packages/rules/src/__tests__/provably-fair.test.ts), [`apps/server/src/__tests__/provably-fair-server.test.ts`](file:///Users/ian/Desktop/taiwan-mahjong1/apps/server/src/__tests__/provably-fair-server.test.ts)
+- [x] **P0-L**: 聽牌與打牌進張分析提示 (Tenpai Wait-Tile Overlay) — 即時計算手牌打出後的牌效、向聽數與全場剩餘張數。
+  - 測試檔：[`packages/rules/src/__tests__/wait.test.ts`](file:///Users/ian/Desktop/taiwan-mahjong1/packages/rules/src/__tests__/wait.test.ts), [`apps/server/src/__tests__/provably-fair-server.test.ts`](file:///Users/ian/Desktop/taiwan-mahjong1/apps/server/src/__tests__/provably-fair-server.test.ts)
+- [x] **P0-M**: 雀魂 (Mahjong Soul) 高質感黑金大廳與結算開牌驗證工具 — 包含三大模式卡片、段位戰、好友房、AI 修煉場與獨立 `/verify` 稽核工具頁。
 - [x] **P1**: 領域規則對齊規格 — 吃碰槓領域契約、標準 5 組+將、八對子（7對+1刻=17張）、骰子定門 (`TAIWAN_WALL_OPENING_V1`)、連續補花 (`IMMEDIATE_TAIL_CHAIN_V1`)。
 - [x] **P2**: 房間狀態機 — 過水獨立維護、優先序 胡 > 槓/碰 > 吃、逾時摸切/過牌、Client-Safe Snapshot 遮蔽、SQLite WAL 單實例持久化與重啟 RNG 重放。
   - 測試檔：[`apps/server/src/__tests__/persistence.test.ts`](file:///Users/ian/Desktop/taiwan-mahjong1/apps/server/src/__tests__/persistence.test.ts)
@@ -41,12 +44,12 @@
 ---
 
 ## Not done
-- **UI 額外 3D 特效與皮膚大工程**：依據硬性約束第 3 條與 P3 最小迴路要求，保持 Client-Safe 純表現層與 headless QA 測試 100% 通過，不引入額外不穩定資源。
+- **UI 額外 3D 特效與大型音畫包**：依據硬性約束第 3 條與 P3 最小迴路要求，保持 Client-Safe 純表現層與 headless QA 測試 100% 通過，確保輕量化 Web 載入速度。
 
 ---
 
 ## Tests after（N pass / 0 fail）
-- **TypeScript / Vitest**: **17 passed / 17 test files** (**264 passed / 0 failed**, 1.4s)
+- **TypeScript / Vitest**: **17 passed / 17 test files** (**266 passed / 0 failed**, 1.4s)
 - **Typecheck**: `pnpm typecheck` **0 errors**
 - **Build**: `pnpm build` **0 errors**
 - **Godot Headless QA**: **58 passed / 0 failed**

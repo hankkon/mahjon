@@ -1,7 +1,32 @@
 # AI 自主迭代紀錄 (AI Iteration Log)
 
-- **執行日期**：2026-08-26
-- **工作範圍**：參考 Stake 實作 Provably Fair (可證明公平性) 種子序與承諾驗證機制、每局種子衍生、SHA-256 承諾廣播、結算開牌驗證、復現重放測試
+- **執行日期**：2026-08-27 ~ 2026-08-28
+- **工作範圍**：聽牌與打牌進張分析提示 (Tenpai Wait-Tile Overlay)、Provably Fair 獨立驗證頁面、雀魂 (Mahjong Soul) 高質感黑金大廳與結算開牌驗證、雲端 Dockerfile 修復與 GitHub 全自動同步
+
+---
+
+## 輪次 14：聽牌即時提示、雀魂大廳重構與雲端部署加固
+
+- **問題**：
+  1. 玩家手牌出牌缺乏即時牌效與聽牌張數提示，新手門檻高。
+  2. 原本大廳介面為純線框文字風格，缺乏現代商用日麻/台麻（如雀魂）之精品質感與模式選擇。
+  3. 結算面板缺乏一鍵 Provably Fair 開牌驗證入口。
+  4. Dockerfile 存在 Alpine native build 工具缺失與 pnpm approve-builds 阻斷。
+
+- **修改檔案**：
+  - `packages/rules/src/wait.ts` & `packages/rules/src/__tests__/wait.test.ts`（新增 `calculateDiscardWaits` 牌效與聽牌分析）
+  - `apps/server/src/snapshot.ts`（`ClientSnapshot` 加入 `discardHints`，即時計算全場棄牌/副露/手牌後剩餘張數）
+  - `apps/server/src/public/verify.html` & `apps/server/src/index.ts`（新增獨立 Provably Fair 驗證網頁與 `/verify` 路由）
+  - `apps/player-client/scenes/Main.tscn` & `scripts/main.gd`（雀魂黑金大廳重構：頂部玩家面板、快速開桌、好友房、AI 修煉場）
+  - `apps/player-client/scripts/table.gd` & `scripts/ui/SettlementView.gd`（出牌聽牌即時浮動提示、四家等候卡片、結算開牌驗證按鈕）
+  - `Dockerfile`, `pnpm-workspace.yaml`, `package.json`, `.dockerignore`（修復 Docker Debian 構建、授權 pnpm 建置原生模組）
+
+- **驗證結果**：
+  - `pnpm test`：**266/266 PASS**（17 個測試檔案全數通過）
+  - `pnpm typecheck`：**Done**（零型別錯誤）
+  - `pnpm build`：**Done**（編譯成功）
+  - Godot Headless QA Check (`qa_render_check.tscn`)：**PASS 58 / FAIL 0**
+  - GitHub 倉庫同步：**成功推送到 `hankkon/mahjon:main`**
 
 ---
 
