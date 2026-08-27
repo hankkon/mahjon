@@ -1,109 +1,465 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene load_steps=12 format=3]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1"]
+
+[sub_resource type="StyleBoxFlat" id="top_bar_style"]
+content_margin_left = 18.0
+content_margin_top = 10.0
+content_margin_right = 18.0
+content_margin_bottom = 10.0
+bg_color = Color(0.07, 0.08, 0.11, 0.92)
+border_width_bottom = 2
+border_color = Color(0.83, 0.68, 0.22, 0.5)
+corner_radius_bottom_right = 16
+corner_radius_bottom_left = 16
+shadow_color = Color(0, 0, 0, 0.6)
+shadow_size = 10
+
+[sub_resource type="StyleBoxFlat" id="card_quick"]
+content_margin_left = 22.0
+content_margin_top = 22.0
+content_margin_right = 22.0
+content_margin_bottom = 22.0
+bg_color = Color(0.12, 0.09, 0.06, 0.95)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.96, 0.78, 0.25, 0.9)
+corner_radius_top_left = 16
+corner_radius_top_right = 16
+corner_radius_bottom_right = 16
+corner_radius_bottom_left = 16
+shadow_color = Color(0.96, 0.78, 0.25, 0.22)
+shadow_size = 18
+
+[sub_resource type="StyleBoxFlat" id="card_custom"]
+content_margin_left = 22.0
+content_margin_top = 22.0
+content_margin_right = 22.0
+content_margin_bottom = 22.0
+bg_color = Color(0.08, 0.09, 0.13, 0.92)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.45, 0.55, 0.75, 0.6)
+corner_radius_top_left = 16
+corner_radius_top_right = 16
+corner_radius_bottom_right = 16
+corner_radius_bottom_left = 16
+shadow_color = Color(0, 0, 0, 0.5)
+shadow_size = 12
+
+[sub_resource type="StyleBoxFlat" id="card_ai"]
+content_margin_left = 22.0
+content_margin_top = 22.0
+content_margin_right = 22.0
+content_margin_bottom = 22.0
+bg_color = Color(0.07, 0.11, 0.09, 0.92)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.25, 0.65, 0.45, 0.6)
+corner_radius_top_left = 16
+corner_radius_top_right = 16
+corner_radius_bottom_right = 16
+corner_radius_bottom_left = 16
+shadow_color = Color(0, 0, 0, 0.5)
+shadow_size = 12
+
+[sub_resource type="StyleBoxFlat" id="card_pf"]
+content_margin_left = 20.0
+content_margin_top = 12.0
+content_margin_right = 20.0
+content_margin_bottom = 12.0
+bg_color = Color(0.09, 0.08, 0.12, 0.88)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.65, 0.45, 0.85, 0.5)
+corner_radius_top_left = 12
+corner_radius_top_right = 12
+corner_radius_bottom_right = 12
+corner_radius_bottom_left = 12
+
+[sub_resource type="StyleBoxFlat" id="btn_gold_hero"]
+content_margin_left = 16.0
+content_margin_top = 12.0
+content_margin_right = 16.0
+content_margin_bottom = 12.0
+bg_color = Color(0.85, 0.65, 0.15, 1)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(1, 0.92, 0.6, 1)
+corner_radius_top_left = 10
+corner_radius_top_right = 10
+corner_radius_bottom_right = 10
+corner_radius_bottom_left = 10
+shadow_color = Color(0.9, 0.68, 0.15, 0.45)
+shadow_size = 10
+
+[sub_resource type="StyleBoxFlat" id="btn_blue"]
+content_margin_left = 14.0
+content_margin_top = 10.0
+content_margin_right = 14.0
+content_margin_bottom = 10.0
+bg_color = Color(0.18, 0.32, 0.62, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.5, 0.7, 1, 0.6)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+
+[sub_resource type="StyleBoxFlat" id="btn_green"]
+content_margin_left = 14.0
+content_margin_top = 10.0
+content_margin_right = 14.0
+content_margin_bottom = 10.0
+bg_color = Color(0.14, 0.45, 0.30, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.4, 0.8, 0.6, 0.6)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+
+[sub_resource type="StyleBoxFlat" id="avatar_box"]
+content_margin_left = 10.0
+content_margin_top = 6.0
+content_margin_right = 10.0
+content_margin_bottom = 6.0
+bg_color = Color(0.83, 0.68, 0.22, 0.2)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.96, 0.78, 0.25, 0.9)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
 
 [node name="Main" type="Control"]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
 script = ExtResource("1")
 
-[node name="CenterContainer" type="CenterContainer" parent="."]
+[node name="Bg" type="ColorRect" parent="."]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.055, 0.063, 0.082, 1)
 
-[node name="VBox" type="VBoxContainer" parent="CenterContainer"]
-layout_mode = 2
-custom_minimum_size = Vector2(480, 0)
-theme_override_constants/separation = 12
+[node name="MainLayout" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 16
 
-[node name="Title" type="Label" parent="CenterContainer/VBox"]
+[node name="TopBar" type="PanelContainer" parent="MainLayout"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 28
-text = "台灣 16 張麻將"
+theme_override_styles/panel = SubResource("top_bar_style")
+
+[node name="TopHBox" type="HBoxContainer" parent="MainLayout/TopBar"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="ProfileHBox" type="HBoxContainer" parent="MainLayout/TopBar/TopHBox"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="AvatarBadge" type="PanelContainer" parent="MainLayout/TopBar/TopHBox/ProfileHBox"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("avatar_box")
+
+[node name="AvatarLabel" type="Label" parent="MainLayout/TopBar/TopHBox/ProfileHBox/AvatarBadge"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.96, 0.78, 0.25, 1)
+theme_override_font_sizes/font_size = 18
+text = "🀄"
+
+[node name="NameEdit" type="LineEdit" parent="MainLayout/TopBar/TopHBox/ProfileHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+custom_minimum_size = Vector2(140, 0)
+placeholder_text = "玩家名稱"
+text = "雀聖一號"
+
+[node name="RankBadge" type="Label" parent="MainLayout/TopBar/TopHBox/ProfileHBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.85, 0.65, 1)
+theme_override_font_sizes/font_size = 14
+text = "【雀聖 ★★★ · 勝率 72%】"
+
+[node name="CoinsBadge" type="Label" parent="MainLayout/TopBar/TopHBox/ProfileHBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.84, 0.3, 1)
+theme_override_font_sizes/font_size = 14
+text = "🪙 88,880"
+
+[node name="Spacer" type="Control" parent="MainLayout/TopBar/TopHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="StatusLight" type="ColorRect" parent="MainLayout/TopBar/TopHBox"]
+custom_minimum_size = Vector2(10, 10)
+layout_mode = 2
+size_flags_vertical = 4
+color = Color(0.2, 0.85, 0.45, 1)
+
+[node name="StatusLabel" type="Label" parent="MainLayout/TopBar/TopHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.8, 0.75, 1)
+theme_override_font_sizes/font_size = 13
+text = "伺服器已連線"
+
+[node name="CenterContent" type="CenterContainer" parent="MainLayout"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="ContentVBox" type="VBoxContainer" parent="MainLayout/CenterContent"]
+layout_mode = 2
+custom_minimum_size = Vector2(1020, 0)
+theme_override_constants/separation = 20
+
+[node name="HeaderTitleBox" type="VBoxContainer" parent="MainLayout/CenterContent/ContentVBox"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="Title" type="Label" parent="MainLayout/CenterContent/ContentVBox/HeaderTitleBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.96, 0.78, 0.25, 1)
+theme_override_font_sizes/font_size = 32
+text = "台灣 16 張麻將 · 雀魂典藏版"
 horizontal_alignment = 1
 
-[node name="Subtitle" type="Label" parent="CenterContainer/VBox"]
+[node name="Subtitle" type="Label" parent="MainLayout/CenterContent/ContentVBox/HeaderTitleBox"]
 layout_mode = 2
-text = "Client-Safe UI — 伺服器為唯一真相來源"
+theme_override_colors/font_color = Color(0.75, 0.75, 0.8, 1)
+theme_override_font_sizes/font_size = 14
+text = "權威伺服器 Client-Safe UI · 雙游標牌牆 · 144 張守恆零和證明 · Stake 可證明公平性"
 horizontal_alignment = 1
 
-[node name="UrlLabel" type="Label" parent="CenterContainer/VBox"]
+[node name="CardsHBox" type="HBoxContainer" parent="MainLayout/CenterContent/ContentVBox"]
 layout_mode = 2
-text = "伺服器位址 (WSS)"
+theme_override_constants/separation = 18
 
-[node name="UrlEdit" type="LineEdit" parent="CenterContainer/VBox"]
+[node name="QuickMatchCard" type="PanelContainer" parent="MainLayout/CenterContent/ContentVBox/CardsHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_styles/panel = SubResource("card_quick")
+
+[node name="VBox" type="VBoxContainer" parent="MainLayout/CenterContent/ContentVBox/CardsHBox/QuickMatchCard"]
+layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="Tag" type="Label" parent="MainLayout/CenterContent/ContentVBox/CardsHBox/QuickMatchCard/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.85, 0.4, 1)
+theme_override_font_sizes/font_size = 12
+text = "★ 熱門推薦 · 雀士段位戰"
+
+[node name="CardTitle" type="Label" parent="MainLayout/CenterContent/ContentVBox/CardsHBox/QuickMatchCard/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.95, 0.85, 1)
+theme_override_font_sizes/font_size = 20
+text = "⚔️ 快速對局 (PLAY)"
+
+[node name="Desc" type="Label" parent="MainLayout/CenterContent/ContentVBox/CardsHBox/QuickMatchCard/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.8, 0.78, 0.7, 1)
+theme_override_font_sizes/font_size = 13
+text = "• 台灣 16 張北部牌 (144張含花)
+• 底 300 / 台 100
+• 一鍵入局 · 智能 AI 自動補位"
+
+[node name="QuickMatchBtn" type="Button" parent="MainLayout/CenterContent/ContentVBox/CardsHBox/QuickMatchCard/VBox"]
 unique_name_in_owner = true
 layout_mode = 2
-text = "ws://localhost:3000/ws"
+custom_minimum_size = Vector2(0, 48)
+theme_override_colors/font_color = Color(0.12, 0.08, 0.02, 1)
+theme_override_font_sizes/font_size = 17
+theme_override_styles/normal = SubResource("btn_gold_hero")
+theme_override_styles/hover = SubResource("btn_gold_hero")
+theme_override_styles/pressed = SubResource("btn_gold_hero")
+text = "🔥 立即入局開桌"
 
-[node name="NameLabel" type="Label" parent="CenterContainer/VBox"]
+[node name="CustomRoomCard" type="PanelContainer" parent="MainLayout/CenterContent/ContentVBox/CardsHBox"]
 layout_mode = 2
-text = "玩家名稱"
+size_flags_horizontal = 3
+theme_override_styles/panel = SubResource("card_custom")
 
-[node name="NameEdit" type="LineEdit" parent="CenterContainer/VBox"]
+[node name="VBox" type="VBoxContainer" parent="MainLayout/CenterContent/ContentVBox/CardsHBox/CustomRoomCard"]
+layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="Tag" type="Label" parent="MainLayout/CenterContent/ContentVBox/CardsHBox/CustomRoomCard/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.6, 0.8, 1, 1)
+theme_override_font_sizes/font_size = 12
+text = "👥 好友私人房"
+
+[node name="CardTitle" type="Label" parent="MainLayout/CenterContent/ContentVBox/CardsHBox/CustomRoomCard/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.95, 1, 1)
+theme_override_font_sizes/font_size = 20
+text = "🏠 自訂牌局約戰"
+
+[node name="RoomEdit" type="LineEdit" parent="MainLayout/CenterContent/ContentVBox/CardsHBox/CustomRoomCard/VBox"]
 unique_name_in_owner = true
 layout_mode = 2
-placeholder_text = "Player"
+placeholder_text = "輸入 6 碼房號 (例: rAbCd1)"
 
-[node name="RoomLabel" type="Label" parent="CenterContainer/VBox"]
-layout_mode = 2
-text = "房間代碼（加入用）"
-
-[node name="RoomEdit" type="LineEdit" parent="CenterContainer/VBox"]
-unique_name_in_owner = true
-layout_mode = 2
-placeholder_text = "例如 rXyZ12"
-
-[node name="Buttons" type="HBoxContainer" parent="CenterContainer/VBox"]
+[node name="BtnsHBox" type="HBoxContainer" parent="MainLayout/CenterContent/ContentVBox/CardsHBox/CustomRoomCard/VBox"]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="CreateBtn" type="Button" parent="CenterContainer/VBox/Buttons"]
+[node name="JoinBtn" type="Button" parent="MainLayout/CenterContent/ContentVBox/CardsHBox/CustomRoomCard/VBox/BtnsHBox"]
 unique_name_in_owner = true
 layout_mode = 2
-custom_minimum_size = Vector2(0, 40)
 size_flags_horizontal = 3
-text = "開房"
+custom_minimum_size = Vector2(0, 44)
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 15
+theme_override_styles/normal = SubResource("btn_blue")
+theme_override_styles/hover = SubResource("btn_blue")
+theme_override_styles/pressed = SubResource("btn_blue")
+text = "加入房間"
 
-[node name="JoinBtn" type="Button" parent="CenterContainer/VBox/Buttons"]
+[node name="CreateBtn" type="Button" parent="MainLayout/CenterContent/ContentVBox/CardsHBox/CustomRoomCard/VBox/BtnsHBox"]
 unique_name_in_owner = true
 layout_mode = 2
-custom_minimum_size = Vector2(0, 40)
 size_flags_horizontal = 3
-text = "加入"
+custom_minimum_size = Vector2(0, 44)
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 15
+theme_override_styles/normal = SubResource("btn_blue")
+theme_override_styles/hover = SubResource("btn_blue")
+theme_override_styles/pressed = SubResource("btn_blue")
+text = "建立新房"
 
-[node name="StatusLabel" type="Label" parent="CenterContainer/VBox"]
+[node name="AIDojoCard" type="PanelContainer" parent="MainLayout/CenterContent/ContentVBox/CardsHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_styles/panel = SubResource("card_ai")
+
+[node name="VBox" type="VBoxContainer" parent="MainLayout/CenterContent/ContentVBox/CardsHBox/AIDojoCard"]
+layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="Tag" type="Label" parent="MainLayout/CenterContent/ContentVBox/CardsHBox/AIDojoCard/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.4, 0.9, 0.65, 1)
+theme_override_font_sizes/font_size = 12
+text = "🤖 單人無壓力"
+
+[node name="CardTitle" type="Label" parent="MainLayout/CenterContent/ContentVBox/CardsHBox/AIDojoCard/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 1, 0.95, 1)
+theme_override_font_sizes/font_size = 20
+text = "🥋 雀術 AI 修煉場"
+
+[node name="Desc" type="Label" parent="MainLayout/CenterContent/ContentVBox/CardsHBox/AIDojoCard/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.85, 0.78, 1)
+theme_override_font_sizes/font_size = 13
+text = "• 初級 (隨機) / 中級 (向聽推進)
+• 高級 (牌效進張 + 現物安牌防守)
+• 零等待秒開 · 牌技磨練首選"
+
+[node name="AIPracticeBtn" type="Button" parent="MainLayout/CenterContent/ContentVBox/CardsHBox/AIDojoCard/VBox"]
 unique_name_in_owner = true
 layout_mode = 2
-theme_override_colors/font_color = Color(0.65, 0.75, 0.65, 1)
-text = "未連線"
-horizontal_alignment = 1
-autowrap_mode = 3
+custom_minimum_size = Vector2(0, 48)
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 16
+theme_override_styles/normal = SubResource("btn_green")
+theme_override_styles/hover = SubResource("btn_green")
+theme_override_styles/pressed = SubResource("btn_green")
+text = "進入修煉對局"
 
-[node name="ReconnectLabel" type="Label" parent="CenterContainer/VBox"]
+[node name="PFBannerCard" type="PanelContainer" parent="MainLayout/CenterContent/ContentVBox"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("card_pf")
+
+[node name="HBox" type="HBoxContainer" parent="MainLayout/CenterContent/ContentVBox/PFBannerCard"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="PFIcon" type="Label" parent="MainLayout/CenterContent/ContentVBox/PFBannerCard/HBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 24
+text = "⚖️"
+
+[node name="PFTextVBox" type="VBoxContainer" parent="MainLayout/CenterContent/ContentVBox/PFBannerCard/HBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="PFTitle" type="Label" parent="MainLayout/CenterContent/ContentVBox/PFBannerCard/HBox/PFTextVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.85, 0.75, 1, 1)
+theme_override_font_sizes/font_size = 14
+text = "Stake-Compliant 可證明公平性 (Provably Fair) 密碼學承諾系統"
+
+[node name="PFSubtitle" type="Label" parent="MainLayout/CenterContent/ContentVBox/PFBannerCard/HBox/PFTextVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.65, 0.65, 0.75, 1)
+theme_override_font_sizes/font_size = 12
+text = "開局廣播 SHA-256 承諾雜湊 · 局後揭露明文種子 · 支援 100% 確定性開牌重放與防作弊稽核"
+
+[node name="VerifyBtn" type="Button" parent="MainLayout/CenterContent/ContentVBox/PFBannerCard/HBox"]
+unique_name_in_owner = true
+layout_mode = 2
+custom_minimum_size = Vector2(140, 36)
+theme_override_colors/font_color = Color(0.95, 0.9, 1, 1)
+theme_override_font_sizes/font_size = 13
+text = "🔍 開啟驗證器"
+
+[node name="BottomBar" type="HBoxContainer" parent="MainLayout"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="UrlEdit" type="LineEdit" parent="MainLayout/BottomBar"]
+unique_name_in_owner = true
+layout_mode = 2
+custom_minimum_size = Vector2(280, 0)
+text = "ws://localhost:3000/ws"
+
+[node name="ReconnectLabel" type="Label" parent="MainLayout/BottomBar"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.7, 0.3, 1)
 text = ""
-horizontal_alignment = 1
 visible = false
 
-[node name="VersionBadge" type="Label" parent="."]
-layout_mode = 1
-anchors_preset = 1
-anchor_left = 1.0
-anchor_right = 1.0
-offset_left = -132.0
-offset_top = 8.0
-offset_right = -8.0
-offset_bottom = 36.0
-theme_override_colors/font_color = Color(0.98, 0.85, 0.3, 1)
-theme_override_colors/font_outline_color = Color(0.25, 0.15, 0.05, 1)
-theme_override_constants/outline_size = 6
-theme_override_font_sizes/font_size = 16
-text = "測試版"
-horizontal_alignment = 1
+[node name="VersionBadge" type="Label" parent="MainLayout/BottomBar"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.5, 0.5, 0.55, 1)
+theme_override_font_sizes/font_size = 12
+text = "Protocol v1.0.0 · Godot 4.7 Engine"
+horizontal_alignment = 2
+

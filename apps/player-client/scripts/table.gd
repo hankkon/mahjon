@@ -287,19 +287,27 @@ func _render_lobby() -> void:
 	reaction_bar.visible = false
 	hand_panel.visible = false
 	table_center.visible = false
-	lobby_info.text = "房號：%s\n台灣 16 張：莊 17／閒 16；可胡則系統自動胡。" % GameState.room_id
+	lobby_info.text = "【房間代碼：%s】  台灣 16 張麻將 · 北部 144 張 (含花牌)\n底 300 / 台 100 · 智能 AI 補位 · 全員準備即自動開局" % GameState.room_id
 	var lines: Array = []
 	var my_ready := false
-	for p in GameState.players:
-		var who: String = "（我）" if int(p.get("seat", -1)) == GameState.you else ""
-		var state_txt: String = "✓ 已準備" if p.get("ready", false) else "未準備"
-		lines.append("座位 %d  %s  %s%s" % [p.get("seat", -1), p.get("playerName", "?"), state_txt, who])
-		if int(p.get("seat", -1)) == GameState.you and p.get("ready", false):
-			my_ready = true
+	var seat_names := ["東 (莊家)", "南 (下家)", "西 (對家)", "北 (上家)"]
+	for s in range(4):
+		var p: Dictionary = _player_view(s)
+		if not p.is_empty() and p.get("playerId") != null:
+			var who: String = "【我】" if s == GameState.you else ""
+			var is_ready: bool = p.get("ready", false) == true
+			var ready_tag: String = "🟢 [ 已準備 READY ]" if is_ready else "⚪ [ 等待中 WAITING ]"
+			var name_str: String = str(p.get("playerName", "Player"))
+			lines.append("🀄 %s  %s %s  %s" % [seat_names[s], name_str, who, ready_tag])
+			if s == GameState.you and is_ready:
+				my_ready = true
+		else:
+			lines.append("🀄 %s  [ 🤖 智能 AI 補位 ]" % seat_names[s])
+
 	lobby_players.text = "\n".join(lines)
 	# 準備按鈕：已準備就鎖定並顯示確認（避免重複送出）。
 	ready_btn.disabled = my_ready
-	ready_btn.text = "已準備 ✓（等待開始…）" if my_ready else "準備 (Ready)"
+	ready_btn.text = "✓ 已就緒（等待全員開局…）" if my_ready else "🔥 準備入局 (READY)"
 
 
 func _on_lobby_panel_input(event: InputEvent) -> void:

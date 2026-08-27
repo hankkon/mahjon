@@ -10,6 +10,12 @@ extends Control
 func _ready() -> void:
 	%CreateBtn.pressed.connect(_on_create_pressed)
 	%JoinBtn.pressed.connect(_on_join_pressed)
+	if has_node("%QuickMatchBtn"):
+		%QuickMatchBtn.pressed.connect(_on_quick_match_pressed)
+	if has_node("%AIPracticeBtn"):
+		%AIPracticeBtn.pressed.connect(_on_ai_practice_pressed)
+	if has_node("%VerifyBtn"):
+		%VerifyBtn.pressed.connect(_on_verify_pressed)
 	if name_edit:
 		name_edit.text_submitted.connect(func(_text: String): _apply_prefs())
 	if room_edit:
@@ -39,6 +45,25 @@ func _ready() -> void:
 		NetworkManager.url = url_edit.text
 	NetworkManager.player_name = name_edit.text if name_edit.text != "" else "Player"
 	NetworkManager.connect_to_server()
+
+
+func _on_quick_match_pressed() -> void:
+	_apply_prefs()
+	status_label.text = "快速匹配中…（AI 智能即時補位）"
+	NetworkManager.create_room()
+
+
+func _on_ai_practice_pressed() -> void:
+	_apply_prefs()
+	status_label.text = "正在進入 AI 雀術修煉場…"
+	NetworkManager.create_room()
+
+
+func _on_verify_pressed() -> void:
+	var verify_url: String = "http://localhost:3000/verify"
+	if OS.has_feature("web"):
+		verify_url = "/verify"
+	OS.shell_open(verify_url)
 
 
 func _on_create_pressed() -> void:
