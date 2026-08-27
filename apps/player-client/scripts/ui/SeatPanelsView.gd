@@ -116,10 +116,18 @@ func render_side_panels(seat_to_panel: Dictionary, opponent_backs: Dictionary, g
 			turn_lbl.add_theme_font_size_override("font_size", 12)
 			row1.add_child(turn_lbl)
 
-		# --- Row 2: 手牌張數 (次要資訊) + 託管/離線狀態標籤 ---
+		# --- Row 2: 點數 + 手牌張數 + 託管/離線狀態標籤 ---
 		var row2 := HBoxContainer.new()
 		row2.add_theme_constant_override("separation", 8)
 		content_vbox.add_child(row2)
+
+		var seat_scores: Array = game_state.scores if "scores" in game_state else []
+		var cur_score: int = int(seat_scores[seat]) if seat < seat_scores.size() else 0
+		var score_lbl := Label.new()
+		score_lbl.text = "🪙 %d" % cur_score
+		score_lbl.add_theme_color_override("font_color", GOLD_TEXT if cur_score >= 0 else Color("#E57373"))
+		score_lbl.add_theme_font_size_override("font_size", 12)
+		row2.add_child(score_lbl)
 
 		var hand_count_lbl := Label.new()
 		hand_count_lbl.text = "%d 張" % int(p.get("handCount", 0))

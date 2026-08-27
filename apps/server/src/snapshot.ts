@@ -144,6 +144,8 @@ export interface ClientSnapshot {
     at: number;
   }>;
   winner: number | null;
+  /** Current chip/point totals for all 4 seats [seat0, seat1, seat2, seat3]. */
+  scores: number[];
   settlement: SettlementView | null;
   /** Stake-compliant Provably Fair commitment (pre-game hash) and proof (post-game reveal). */
   provablyFair?: {
@@ -417,6 +419,7 @@ export function buildClientSnapshot(room: RoomLike, seat: number): ClientSnapsho
       room.phaseDeadline === null ? null : Math.max(0, room.phaseDeadline - Date.now()),
     autoplayLog: room.autoplayLog,
     winner: room.winner,
+    scores: room.scores,
     settlement:
       room.status === "ended" && room.ledger
         ? {

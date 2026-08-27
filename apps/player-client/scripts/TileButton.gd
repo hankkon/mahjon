@@ -67,10 +67,24 @@ func _ready() -> void:
 	_refresh_appearance()
 
 
+var _touch_start_pos := Vector2.ZERO
+
 func _on_gui_input(event: InputEvent) -> void:
-	if event is InputEventScreenTouch and event.pressed:
-		if not disabled:
-			_on_pressed()
+	if event is InputEventScreenTouch:
+		if event.pressed:
+			_touch_start_pos = event.position
+			if not disabled:
+				_on_pressed()
+		else:
+			var delta_y: float = event.position.y - _touch_start_pos.y
+			if delta_y < -40.0 and playable and not disabled:
+				tile_discarded.emit(instance_id)
+				NetworkManager.send_discard(instance_id)
+	elif event is InputEventScreenDrag:
+		var drag_y: float = event.position.y - _touch_start_pos.y
+		if drag_y < -50.0 and playable and not disabled:
+			tile_discarded.emit(instance_id)
+			NetworkManager.send_discard(instance_id)
 
 
 func _exit_tree() -> void:

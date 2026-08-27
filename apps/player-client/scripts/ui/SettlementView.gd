@@ -40,9 +40,14 @@ func show(game_state: Node) -> void:
 	var line_index := 0
 	var winner_v: Variant = s.get("winner", -1) if not s.is_empty() else null
 	if winner_v == null:
+		title.text = "⚪ 流局（和局）"
 		header.append("流局（和局）")
 	else:
 		var winner: int = int(winner_v)
+		if winner == game_state.you:
+			title.text = "👑 榮和勝利！ (VICTORY)" if not s.get("selfDraw", false) else "🌟 絕張自摸！ (TSUMO)"
+		else:
+			title.text = "✦ 對局結算 (ROUND OVER)"
 		header.append("贏家：%s" % game_state.seat_name(winner))
 		if s.get("selfDraw", false):
 			header.append("自摸（系統自動胡）")

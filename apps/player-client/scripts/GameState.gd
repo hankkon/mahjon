@@ -44,6 +44,10 @@ var autoplay_log: Array = []
 var discard_hints: Array = []
 ## 可證明公平性承諾與開牌證明 (Provably Fair)
 var provably_fair: Dictionary = {}
+## 歷史牌譜覆盤紀錄 (Match Replay)
+var match_replay: Dictionary = {}
+## 四家即時分數/代幣點數 [seat0, seat1, seat2, seat3]
+var scores: Array = [0, 0, 0, 0]
 
 # --- 標籤文字對照 ---
 const SUIT_CN := {"wan": "萬", "tiao": "條", "tong": "筒"}
@@ -83,6 +87,8 @@ func apply_snapshot(snap: Dictionary) -> void:
 	reaction_hint = snap.get("reactionHint", {}) if snap.get("reactionHint") != null else {}
 	discard_hints = snap.get("discardHints", []) if snap.get("discardHints") != null else []
 	provably_fair = snap.get("provablyFair", {}) if snap.get("provablyFair") != null else {}
+	match_replay = snap.get("matchReplay", {}) if snap.get("matchReplay") != null else {}
+	scores = snap.get("scores", scores) if snap.get("scores") != null else scores
 	can_win = snap.get("canWin", false) == true
 	winner = snap.get("winner", -1) if snap.get("winner") != null else -1
 	settlement = snap.get("settlement", {}) if snap.get("settlement") != null else {}
