@@ -60,6 +60,25 @@ func show(game_state: Node) -> void:
 		_styled(al, GOLD_TEXT_DIM, 14)
 		fan_list.add_child(al)
 
+	# 可證明公平性 (Provably Fair) 開牌稽核按鈕
+	var pf: Dictionary = game_state.provably_fair
+	var proof_v: Variant = pf.get("proof", null)
+	if proof_v is Dictionary and not proof_v.is_empty():
+		var pf_btn := Button.new()
+		pf_btn.text = "⚖️ 驗證本局公平性 (Provably Fair Audit)"
+		pf_btn.custom_minimum_size = Vector2(0, 36)
+		pf_btn.pressed.connect(func():
+			var s_seed: String = str(proof_v.get("serverSeed", ""))
+			var s_hash: String = str(proof_v.get("serverSeedHash", ""))
+			var c_seed: String = str(proof_v.get("clientSeed", ""))
+			var nonce: int = int(proof_v.get("nonce", 1))
+			var url := "http://localhost:3000/verify?serverSeed=%s&serverSeedHash=%s&clientSeed=%s&nonce=%d" % [s_seed, s_hash, c_seed, nonce]
+			if OS.has_feature("web"):
+				url = "/verify?serverSeed=%s&serverSeedHash=%s&clientSeed=%s&nonce=%d" % [s_seed, s_hash, c_seed, nonce]
+			OS.shell_open(url)
+		)
+		fan_list.add_child(pf_btn)
+
 	detail.text = "\n".join(header)
 	var my_ready := false
 	for p in game_state.players:
