@@ -1,22 +1,12 @@
-# Local tooling / VCS
 .git
 .gitignore
 .DS_Store
-
-# Node
 node_modules
 dist
 coverage
 *.log
-
-# Godot client (allow export/web for Web serving)
-apps/player-client/*
-!apps/player-client/export
-!apps/player-client/export/web
 .godot
-
-# Runtime/deploy data (certs, ACME challenge) — mounted via volumes, never baked in
-data
-nginx
-docker-compose.yml
-DEPLOYMENT.md
+apps/player-client/assets
+apps/player-client/scenes
+apps/player-client/scripts
+apps/player-client/.godot

@@ -2,17 +2,17 @@ FROM node:22-bookworm-slim
 
 WORKDIR /app
 
-# Enable pnpm via Corepack
-ENV PNPM_HOME="/pnpm"
-ENV PATH="$PNPM_HOME:$PATH"
-ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
-RUN corepack enable && corepack prepare pnpm@11.21.0 --activate
+# Install native build dependencies for better-sqlite3 / node-gyp
+RUN apt-get update && apt-get install -y python3 make g++ --no-install-recommends && rm -rf /var/lib/apt/lists/*
 
-# Copy workspace files
+# Install pnpm globally via npm for 100% reliability
+RUN npm install -g pnpm@latest
+
+# Copy all files
 COPY . .
 
-# Install dependencies and build monorepo
-RUN pnpm install --frozen-lockfile
+# Install and build
+RUN pnpm install
 RUN pnpm build
 
 EXPOSE 3000
