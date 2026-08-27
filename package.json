@@ -9,6 +9,7 @@
   },
   "packageManager": "pnpm@11.21.0",
   "scripts": {
+    "start": "node apps/server/dist/apps/server/src/serve-web.js",
     "build": "pnpm -r run build",
     "dev": "pnpm --filter @taiwan-mahjong/server dev",
     "dev:web": "pnpm --filter @taiwan-mahjong/server dev:web",

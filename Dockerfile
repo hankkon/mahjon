@@ -2,16 +2,16 @@ FROM node:22-bookworm-slim
 
 WORKDIR /app
 
-# Install native build dependencies for better-sqlite3 / node-gyp
+# Install native build tools for better-sqlite3
 RUN apt-get update && apt-get install -y python3 make g++ --no-install-recommends && rm -rf /var/lib/apt/lists/*
 
-# Install pnpm globally via npm for 100% reliability
-RUN npm install -g pnpm@latest
+# Install pnpm pinned to exact packageManager version
+RUN npm install -g pnpm@11.21.0
 
-# Copy all files
+# Copy workspace configuration and sources
 COPY . .
 
-# Install and build
+# Install dependencies and build
 RUN pnpm install
 RUN pnpm build
 
