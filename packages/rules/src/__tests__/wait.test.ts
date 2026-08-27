@@ -7,7 +7,13 @@
 
 import { describe, expect, it } from "vitest";
 import { tiles } from "./helpers.js";
-import { analyzeWait, enumerateGroupings, hasAllChowsStructure, hasExclusiveWaitRole } from "../wait.js";
+import {
+  analyzeWait,
+  calculateDiscardWaits,
+  enumerateGroupings,
+  hasAllChowsStructure,
+  hasExclusiveWaitRole,
+} from "../wait.js";
 import type { TileInstance } from "../tiles.js";
 
 /** Find the instance whose identity id matches. */
@@ -195,3 +201,34 @@ describe("hasAllChowsStructure — 平胡結構", () => {
     expect(hasAllChowsStructure(hand, melds)).toBe(false);
   });
 });
+
+describe("calculateDiscardWaits — 聽牌與打牌提示", () => {
+  it("accurately finds tenpai waits when discarding an unneeded tile", () => {
+    // 17-tile hand: 5 runs ready + pair waiting on 兩面 (2萬/5萬) + 1 extra unneeded tile (中)
+    const hand = tiles(
+      "wan:3", "wan:4", // wait 2萬, 5萬
+      "wan:6", "wan:7", "wan:8",
+      "tiao:1", "tiao:2", "tiao:3",
+      "tiao:7", "tiao:8", "tiao:9",
+      "tong:4", "tong:5", "tong:6",
+      "tong:9", "tong:9", // pair
+      "honor:zhong", // unneeded tile
+    );
+
+    const hints = calculateDiscardWaits(hand, []);
+    expect(hints.length).toBe(17);
+
+    // Discarding honor:zhong enters tenpai with waits: wan:2, wan:5
+    const zhongHint = hints.find((h) => h.tileId === "honor:zhong");
+    expect(zhongHint).toBeDefined();
+    expect(zhongHint!.isTenpai).toBe(true);
+    expect(zhongHint!.waitingTileIds).toContain("wan:2");
+    expect(zhongHint!.waitingTileIds).toContain("wan:5");
+
+    // Discarding tong:9 breaks the pair and is NOT tenpai
+    const tong9Hint = hints.find((h) => h.tileId === "tong:9");
+    expect(tong9Hint).toBeDefined();
+    expect(tong9Hint!.isTenpai).toBe(false);
+  });
+});
+

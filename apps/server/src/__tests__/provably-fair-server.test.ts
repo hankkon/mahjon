@@ -100,4 +100,17 @@ describe("Server Provably Fair (Stake-compliant seed verification)", () => {
     expect(room.handNonce).toBe(2);
     expect(room.serverSeedHash).not.toBe(hand1Hash);
   });
+
+  it("provides discardHints when it is player's turn to discard", () => {
+    const room = new Room({ id: "pf-hints", variant: "north" });
+    ["a", "b", "c", "d"].forEach((id) => room.join(id, id));
+    ["a", "b", "c", "d"].forEach((id) => room.setReady(id));
+
+    expect(room.status).toBe("playing");
+    const turn = room.state!.turn;
+    const snap = buildClientSnapshot(room, turn);
+    expect(snap.discardHints).toBeDefined();
+    expect(snap.discardHints!.length).toBe(17); // Dealer has 17 tiles initially
+    expect(snap.discardHints![0]!.waits).toBeDefined();
+  });
 });

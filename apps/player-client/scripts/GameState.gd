@@ -40,6 +40,10 @@ var phase_deadline := -1
 var countdown_ms := -1
 ## 本局伺服器自動託管紀錄：[ {seat, action, reason, at} ]。
 var autoplay_log: Array = []
+## 打牌與聽牌提示 (Discard & Tenpai Hints)：[ {tileInstanceId, tileId, isTenpai, shanten, waits, totalWaitRemaining} ]
+var discard_hints: Array = []
+## 可證明公平性承諾與開牌證明 (Provably Fair)
+var provably_fair: Dictionary = {}
 
 # --- 標籤文字對照 ---
 const SUIT_CN := {"wan": "萬", "tiao": "條", "tong": "筒"}
@@ -77,6 +81,8 @@ func apply_snapshot(snap: Dictionary) -> void:
 	wall_head_remaining = wall.get("headRemaining", 0)
 	wall_deck_remaining = wall.get("deckRemaining", 0)
 	reaction_hint = snap.get("reactionHint", {}) if snap.get("reactionHint") != null else {}
+	discard_hints = snap.get("discardHints", []) if snap.get("discardHints") != null else []
+	provably_fair = snap.get("provablyFair", {}) if snap.get("provablyFair") != null else {}
 	can_win = snap.get("canWin", false) == true
 	winner = snap.get("winner", -1) if snap.get("winner") != null else -1
 	settlement = snap.get("settlement", {}) if snap.get("settlement") != null else {}
@@ -233,3 +239,12 @@ func autoplay_summary() -> String:
 		var action: String = "摸切" if e.get("action", "") == "discard" else "過"
 		parts.append("%s%s" % [seat_name(seat), action])
 	return "、".join(parts)
+
+
+## 取得特定手牌打出後的聽牌/進張提示
+func get_discard_hint(instance_id: int) -> Dictionary:
+	for h in discard_hints:
+		if int(h.get("tileInstanceId", -1)) == instance_id:
+			return h
+	return {}
+

@@ -241,3 +241,54 @@ export function hasAllChowsStructure(
   const groupings = enumerateGroupings(hand);
   return groupings.some((g) => g.groups.every(isRunGroup));
 }
+
+export interface DiscardWaitHint {
+  tileInstanceId: number;
+  tileId: string;
+  isTenpai: boolean;
+  shanten: number;
+  waitingTileIds: string[];
+}
+
+/**
+ * Given a 17-tile hand in discard phase, calculate what happens if each tile is discarded.
+ * Returns for each tile: if discarded, whether the remaining 16 tiles enter Tenpai (聽牌)
+ * and what faces complete the hand.
+ */
+export function calculateDiscardWaits(
+  hand: readonly TileInstance[],
+  melds: readonly Meld[] = [],
+): DiscardWaitHint[] {
+  const hints: DiscardWaitHint[] = [];
+  const checkedFaces = new Map<string, { isTenpai: boolean; shanten: number; waitingTileIds: string[] }>();
+
+  for (const inst of hand) {
+    const faceId = tileToId(inst.tile);
+    let cached = checkedFaces.get(faceId);
+    if (!cached) {
+      const remainingHand = hand.filter((t) => t.instanceId !== inst.instanceId);
+      const waitingTileIds: string[] = [];
+      for (const face of ALL_STANDARD_FACE_IDS) {
+        const testTile: TileInstance = { instanceId: -999, tile: tileFromId(face) };
+        if (detectWin([...remainingHand, testTile], melds).win) {
+          waitingTileIds.push(face);
+        }
+      }
+      const isTenpai = waitingTileIds.length > 0;
+      cached = {
+        isTenpai,
+        shanten: isTenpai ? 0 : 1,
+        waitingTileIds,
+      };
+      checkedFaces.set(faceId, cached);
+    }
+    hints.push({
+      tileInstanceId: inst.instanceId,
+      tileId: faceId,
+      isTenpai: cached.isTenpai,
+      shanten: cached.shanten,
+      waitingTileIds: cached.waitingTileIds,
+    });
+  }
+  return hints;
+}

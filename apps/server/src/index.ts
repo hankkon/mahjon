@@ -9,7 +9,7 @@
 
 import { createServer, type ServerResponse } from "node:http";
 import { createReadStream, existsSync, statSync } from "node:fs";
-import { extname, join, resolve, sep } from "node:path";
+import { extname, join, resolve, sep, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RoomManager } from "./roomManager.js";
 import { GameServer } from "./wss.js";
@@ -180,6 +180,25 @@ export async function startServer(config: ServerConfig = {}): Promise<RunningSer
       );
       return;
     }
+
+    const cleanUrl = (req.url ?? "/").split("?")[0];
+    if (cleanUrl === "/verify" || cleanUrl === "/verify.html") {
+      const here = dirname(fileURLToPath(import.meta.url));
+      const verifyCandidates = [
+        join(here, "public", "verify.html"),
+        join(here, "..", "src", "public", "verify.html"),
+        join(process.cwd(), "apps", "server", "src", "public", "verify.html"),
+        join(process.cwd(), "src", "public", "verify.html"),
+      ];
+      for (const p of verifyCandidates) {
+        if (existsSync(p)) {
+          res.writeHead(200, { "content-type": MIME[".html"] });
+          createReadStream(p).pipe(res);
+          return;
+        }
+      }
+    }
+
     if (webRoot) {
       serveStatic(webRoot, req.url ?? "/", res);
       return;

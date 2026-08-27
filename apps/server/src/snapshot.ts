@@ -28,6 +28,7 @@ import {
   kongOptions,
   pengOptions,
   tileToId,
+  calculateDiscardWaits,
 } from "@taiwan-mahjong/rules";
 
 // ---------------------------------------------------------------------------
@@ -64,6 +65,20 @@ export interface ReactionHint {
   canKong: boolean;
   chiOptions: WireChiOption[];
   kongOptions: WireKongOption[];
+}
+
+export interface DiscardWaitDetail {
+  tileId: string;
+  remaining: number;
+}
+
+export interface DiscardHintWire {
+  tileInstanceId: number;
+  tileId: string;
+  isTenpai: boolean;
+  shanten: number;
+  waits: DiscardWaitDetail[];
+  totalWaitRemaining: number;
 }
 
 export interface PlayerView {
@@ -112,6 +127,8 @@ export interface ClientSnapshot {
   lastDrawnTile: TileWire | null;
   wall: { headRemaining: number; deckRemaining: number };
   reactionHint: ReactionHint | null;
+  /** 打牌與聽牌提示 (Discard & Tenpai Hints) — 輪到自己出牌時提供每張牌打出後的聽牌/進張分析 */
+  discardHints?: DiscardHintWire[] | null;
   /** 可胡狀態（聽牌）— the viewer is one tile away from a win; feeds 胡牌光暈. */
   canWin: boolean;
   /** Epoch-ms deadline for the current phase's autoplay timeout (null = none). */
@@ -283,6 +300,53 @@ function computeHint(state: GameState, seat: number): ReactionHint | null {
   return hint.canChi || hint.canPeng || hint.canKong ? hint : null;
 }
 
+function computeDiscardHints(state: GameState, seat: number): DiscardHintWire[] | null {
+  if (state.phase !== "discard" || state.turn !== seat) return null;
+  const hand = state.wall.hands[seat];
+  if (!hand || hand.length === 0) return null;
+  const melds = state.melds[seat] ?? [];
+  const rawHints = calculateDiscardWaits(hand, melds);
+
+  // Count seen copies of each tile face across visible cards (all discards, all melds, all flowers, viewer's own hand)
+  const seenMap = new Map<string, number>();
+  for (const t of hand) {
+    seenMap.set(tileToId(t.tile), (seenMap.get(tileToId(t.tile)) ?? 0) + 1);
+  }
+  for (const meldList of state.melds) {
+    for (const m of meldList) {
+      for (const t of m.tiles) {
+        seenMap.set(tileToId(t.tile), (seenMap.get(tileToId(t.tile)) ?? 0) + 1);
+      }
+    }
+  }
+  for (const flowerList of state.wall.flowers) {
+    for (const t of flowerList) {
+      seenMap.set(tileToId(t.tile), (seenMap.get(tileToId(t.tile)) ?? 0) + 1);
+    }
+  }
+  for (const t of state.discards) {
+    seenMap.set(tileToId(t.tile), (seenMap.get(tileToId(t.tile)) ?? 0) + 1);
+  }
+
+  return rawHints.map((h) => {
+    let totalRem = 0;
+    const waits: DiscardWaitDetail[] = h.waitingTileIds.map((tid) => {
+      const seen = seenMap.get(tid) ?? 0;
+      const rem = Math.max(0, 4 - seen);
+      totalRem += rem;
+      return { tileId: tid, remaining: rem };
+    });
+    return {
+      tileInstanceId: h.tileInstanceId,
+      tileId: h.tileId,
+      isTenpai: h.isTenpai,
+      shanten: h.shanten,
+      waits,
+      totalWaitRemaining: totalRem,
+    };
+  });
+}
+
 /** Build the Client-Safe snapshot as seen from `seat`. */
 export function buildClientSnapshot(room: RoomLike, seat: number): ClientSnapshot {
   const state = room.state;
@@ -342,6 +406,7 @@ export function buildClientSnapshot(room: RoomLike, seat: number): ClientSnapsho
       ? { headRemaining: headRemaining(state.wall), deckRemaining: deckRemaining(state.wall) }
       : { headRemaining: 0, deckRemaining: 0 },
     reactionHint: state ? computeHint(state, seat) : null,
+    discardHints: state ? computeDiscardHints(state, seat) : null,
     canWin: state ? isTenpai(state, seat) : false,
     phaseDeadline: room.phaseDeadline,
     countdownMs:

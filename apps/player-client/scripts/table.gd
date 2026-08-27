@@ -924,13 +924,38 @@ func _apply_tile_extras(btn: Button) -> void:
 	btn.set_win_glow(GameState.can_win)
 	var inst: int = btn.instance_id if "instance_id" in btn else -1
 	btn.set_selected(inst == _selected_instance_id)
-	# 輪到「我」出牌時，點選的牌顯示棄牌池中同張剩餘張數（tooltip）。
+
+	# 輪到「我」出牌時，點選的牌顯示打出後的聽牌/進張分析提示（tooltip 與手牌頂部標籤）。
 	if inst == _selected_instance_id and GameState.is_my_discard_turn() and btn.tile_id != "":
-		var out: int = 0
-		for d in GameState.discards:
-			if str(d) == btn.tile_id:
-				out += 1
-		btn.tooltip_text = "%s 棄牌池已出 %d 張" % [GameState.tile_label(btn.tile_id), out]
+		var hint: Dictionary = GameState.get_discard_hint(inst)
+		if not hint.is_empty():
+			if hint.get("isTenpai", false):
+				var waits_arr: Array = hint.get("waits", [])
+				var wait_labels: Array = []
+				for w in waits_arr:
+					var tid: String = str(w.get("tileId", ""))
+					var rem: int = int(w.get("remaining", 0))
+					wait_labels.append("%s(%d張)" % [GameState.tile_label(tid), rem])
+				var total_rem: int = int(hint.get("totalWaitRemaining", 0))
+				var wait_str: String = "、".join(wait_labels)
+				btn.tooltip_text = "【聽牌】打此張聽：%s (共 %d 張)" % [wait_str, total_rem]
+				if hand_label:
+					hand_label.text = "【聽牌提示】打 %s 聽：%s （共 %d 張）" % [GameState.tile_label(btn.tile_id), wait_str, total_rem]
+			else:
+				var shanten: int = int(hint.get("shanten", 1))
+				var out: int = 0
+				for d in GameState.discards:
+					if str(d) == btn.tile_id:
+						out += 1
+				btn.tooltip_text = "%s (棄牌池已出 %d 張 / 打出後 %d 向聽)" % [GameState.tile_label(btn.tile_id), out, shanten]
+				if hand_label:
+					hand_label.text = "我的手牌（%d 張）— %s 打出後 %d 向聽 (池內已見 %d 張)" % [GameState.my_hand().size(), GameState.tile_label(btn.tile_id), shanten, out]
+		else:
+			var out: int = 0
+			for d in GameState.discards:
+				if str(d) == btn.tile_id:
+					out += 1
+			btn.tooltip_text = "%s 棄牌池已出 %d 張" % [GameState.tile_label(btn.tile_id), out]
 	else:
 		btn.tooltip_text = btn.tile_id
 
@@ -938,6 +963,8 @@ func _apply_tile_extras(btn: Button) -> void:
 ## 更新選中 instanceId，並同步所有手牌按鈕的選中/算牌高亮與棄牌池同款高亮。
 func _set_selection(instance_id: int) -> void:
 	_selected_instance_id = instance_id
+	if _selected_instance_id < 0 and hand_label and GameState.status == "playing":
+		hand_label.text = "我的手牌（%d 張）" % GameState.my_hand().size()
 	if hand_view:
 		hand_view.set_selection(instance_id)
 	for child in hand_area.get_children():
