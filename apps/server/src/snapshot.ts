@@ -19,6 +19,7 @@ import type {
   Suit,
   TileInstance,
   ProvablyFairProof,
+  MatchReplay,
 } from "@taiwan-mahjong/rules";
 import {
   chiOptions,
@@ -151,6 +152,8 @@ export interface ClientSnapshot {
     nonce: number;
     proof?: ProvablyFairProof | null;
   } | null;
+  /** Complete post-game replay log (reveals all hidden initial hands and steps). */
+  matchReplay?: MatchReplay | null;
 }
 
 /** Structural contract Room satisfies so snapshot.ts never imports room.ts. */
@@ -183,6 +186,7 @@ export interface RoomLike {
   clientSeed: string;
   handNonce: number;
   provablyFairProof: ProvablyFairProof | null;
+  matchReplay?: MatchReplay | null;
 }
 
 export interface RoomPlayerLike {
@@ -433,5 +437,6 @@ export function buildClientSnapshot(room: RoomLike, seat: number): ClientSnapsho
             proof: room.status === "ended" ? room.provablyFairProof : null,
           }
         : null,
+    matchReplay: room.status === "ended" ? (room.matchReplay ?? null) : null,
   };
 }

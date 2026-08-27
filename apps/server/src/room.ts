@@ -29,6 +29,7 @@ import {
   drawTile,
   evaluateFans,
   headRemaining,
+  deckRemaining,
   nextSeat,
   performChi,
   performDiscard,
@@ -49,6 +50,11 @@ import {
   generateClientSeed,
   generateServerSeed,
   hashServerSeed,
+  tileToId,
+  type MatchReplay,
+  type ReplayInitialDeal,
+  type ReplayStep,
+  type ReplayActionType,
 } from "@taiwan-mahjong/rules";
 import type { ClientCommand, ReactionCommand } from "./protocol.js";
 import type { RoomLike, RoomPlayerLike } from "./snapshot.js";
@@ -195,6 +201,22 @@ export class Room implements RoomLike {
   handNonce = 0;
   provablyFairProof: ProvablyFairProof | null = null;
   private activeDerivedSeed: number | null = null;
+
+  /** Deterministic Match Replay (牌譜覆盤) */
+  matchReplay: MatchReplay | null = null;
+  private replaySteps: ReplayStep[] = [];
+  private replayInitial: ReplayInitialDeal | null = null;
+  private handStartedAt = "";
+
+  recordStep(type: ReplayActionType, seat: number, details: Partial<ReplayStep> = {}): void {
+    this.replaySteps.push({
+      step: this.replaySteps.length + 1,
+      type,
+      seat,
+      at: Date.now(),
+      ...details,
+    });
+  }
 
   private readonly rng: RngFn;
   private readonly hasExplicitRngSeed: boolean;
@@ -387,6 +409,19 @@ export class Room implements RoomLike {
     // A fresh round also resets the operationId idempotency ledger — otherwise
     // every round would re-accumulate executed operationIds forever.
     this.executed.clear();
+    this.handStartedAt = new Date().toISOString();
+    this.replaySteps = [];
+    this.matchReplay = null;
+    this.replayInitial = {
+      dealer: this.state.dealer,
+      dice: [dice.d1, dice.d2, dice.d3],
+      hands: this.state.wall.hands.map((h) => h.map((t) => tileToId(t.tile))),
+      flowers: this.state.wall.flowers.map((f) => f.map((t) => tileToId(t.tile))),
+      wallCount: headRemaining(this.state.wall) + deckRemaining(this.state.wall),
+      serverSeedHash: this.serverSeedHash,
+      clientSeed: this.clientSeed,
+      nonce: this.handNonce,
+    };
     this.status = "playing";
     // 天胡 (dealer wins on the initial 17-tile deal) — 合法即自動胡牌.
     if (detectWin(dealerHand, this.state.melds[this.dealer] as Meld[]).win) {
@@ -492,9 +527,11 @@ export class Room implements RoomLike {
       return { ok: false, error: { code: "wrong_phase", message: "Cannot discard now" } };
     }
     const hand = state.wall.hands[seat]!;
-    if (!hand.some((t) => t.instanceId === tileInstanceId)) {
+    const discardTile = hand.find((t) => t.instanceId === tileInstanceId);
+    if (!discardTile) {
       return { ok: false, error: { code: "no_tile", message: "Tile not in hand" } };
     }
+    this.recordStep("discard", seat, { tileId: tileToId(discardTile.tile) });
     performDiscard(state, seat, tileInstanceId);
     this.afterDiscard();
     return { ok: true };
@@ -869,6 +906,25 @@ export class Room implements RoomLike {
       };
       this.serverSeed = null;
     }
+    if (this.replayInitial) {
+      this.matchReplay = {
+        id: `${this.id}-${this.handNonce}`,
+        roomId: this.id,
+        variant: this.variant,
+        handNonce: this.handNonce,
+        startedAt: this.handStartedAt,
+        endedAt: new Date().toISOString(),
+        initial: this.replayInitial,
+        steps: [...this.replaySteps],
+        winner: this.winner,
+        selfDraw: this.selfDraw,
+        kongDraw: this.kongDraw,
+        fanBreakdown: this.breakdown,
+        scores: [...this.scores],
+        ledger: [...(this.ledger ?? [])],
+        provablyFairProof: this.provablyFairProof,
+      };
+    }
     this.status = "ended";
     this.state = state;
     this.clearAutoplay();
@@ -895,6 +951,25 @@ export class Room implements RoomLike {
         derivedSeed: this.activeDerivedSeed,
       };
       this.serverSeed = null;
+    }
+    if (this.replayInitial) {
+      this.matchReplay = {
+        id: `${this.id}-${this.handNonce}`,
+        roomId: this.id,
+        variant: this.variant,
+        handNonce: this.handNonce,
+        startedAt: this.handStartedAt,
+        endedAt: new Date().toISOString(),
+        initial: this.replayInitial,
+        steps: [...this.replaySteps],
+        winner: null,
+        selfDraw: false,
+        kongDraw: false,
+        fanBreakdown: null,
+        scores: [...this.scores],
+        ledger: [...(this.ledger ?? [])],
+        provablyFairProof: this.provablyFairProof,
+      };
     }
     // 流局: 莊家連莊 — the dealer keeps the seat and the streak advances.
     this.dealerStreak += 1;

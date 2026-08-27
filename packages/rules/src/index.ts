@@ -12,3 +12,4 @@ export * from "./wait.js";
 export * from "./scoring.js";
 export * from "./reactions.js";
 export * from "./provably-fair.js";
+export * from "./replay.js";

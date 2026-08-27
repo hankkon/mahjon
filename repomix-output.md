@@ -14,7 +14,7 @@ The content is organized as follows:
 2. Repository information and directory structure
 3. File content blocks: `## File: <path>` followed by the exact source code in markdown code blocks.
 
-Generated: 2026-08-27T07:01:34.576Z
+Generated: 2026-08-27T16:09:17.026Z
 
 # Repository Information
 
@@ -177,28 +177,18 @@ vitest.config.ts
 ## File: .dockerignore
 
 ```
-# Local tooling / VCS
 .git
 .gitignore
 .DS_Store
-
-# Node
 node_modules
 dist
 coverage
 *.log
-
-# Godot client (allow export/web for Web serving)
-apps/player-client/*
-!apps/player-client/export
-!apps/player-client/export/web
 .godot
-
-# Runtime/deploy data (certs, ACME challenge) — mounted via volumes, never baked in
-data
-nginx
-docker-compose.yml
-DEPLOYMENT.md
+apps/player-client/assets
+apps/player-client/scenes
+apps/player-client/scripts
+apps/player-client/.godot
 ```
 
 ## File: .env.example
@@ -535,30 +525,31 @@ docker compose exec nginx nginx -s reload   # 若 nginx.conf 有改
 ## File: Dockerfile
 
 ```
-FROM node:22-alpine
+FROM node:22-bookworm-slim
 
 WORKDIR /app
 
-# Enable pnpm via Corepack
-RUN corepack enable && corepack prepare pnpm@latest --activate
+# Install native build tools for better-sqlite3
+RUN apt-get update && apt-get install -y python3 make g++ --no-install-recommends && rm -rf /var/lib/apt/lists/*
 
-# Copy workspace files
+# Install pnpm pinned to exact packageManager version
+RUN npm install -g pnpm@11.21.0
+
+# Copy workspace configuration and sources
 COPY . .
 
-# Install dependencies and build monorepo
-RUN pnpm install --frozen-lockfile
+# Install dependencies and build
+RUN pnpm install
 RUN pnpm build
 
 EXPOSE 3000
 
 ENV PORT=3000
+ENV HOST=0.0.0.0
 ENV ENABLE_AI=true
 ENV WEB_ROOT=/app/apps/player-client/export/web
-# Durable rooms: keep SQLite outside the image so restarts survive.
-ENV SQLITE_PATH=/data/server.sqlite
+ENV SQLITE_PATH=/tmp/server.sqlite
 ENV SEAT_CREDENTIAL_SECRET=
-
-VOLUME ["/data"]
 
 CMD ["node", "apps/server/dist/apps/server/src/serve-web.js"]
 ```
@@ -599,6 +590,9 @@ CMD ["node", "apps/server/dist/apps/server/src/serve-web.js"]
   - 測試檔：[`apps/server/src/__tests__/p0-spec-compliance.test.ts`](file:///Users/ian/Desktop/taiwan-mahjong1/apps/server/src/__tests__/p0-spec-compliance.test.ts), [`packages/rules/src/__tests__/scoring.test.ts`](file:///Users/ian/Desktop/taiwan-mahjong1/packages/rules/src/__tests__/scoring.test.ts)
 - [x] **P0-K**: Stake-Compliant Provably Fair (可證明公平性) 種子序與承諾驗證機制 — 256-bit CSPRNG 秘密伺服器種子 + SHA-256 承諾廣播 + HMAC-SHA256 確定性每局衍生 + 結算開牌驗證與 100% 牌局重放。
   - 測試檔：[`packages/rules/src/__tests__/provably-fair.test.ts`](file:///Users/ian/Desktop/taiwan-mahjong1/packages/rules/src/__tests__/provably-fair.test.ts), [`apps/server/src/__tests__/provably-fair-server.test.ts`](file:///Users/ian/Desktop/taiwan-mahjong1/apps/server/src/__tests__/provably-fair-server.test.ts)
+- [x] **P0-L**: 聽牌與打牌進張分析提示 (Tenpai Wait-Tile Overlay) — 即時計算手牌打出後的牌效、向聽數與全場剩餘張數。
+  - 測試檔：[`packages/rules/src/__tests__/wait.test.ts`](file:///Users/ian/Desktop/taiwan-mahjong1/packages/rules/src/__tests__/wait.test.ts), [`apps/server/src/__tests__/provably-fair-server.test.ts`](file:///Users/ian/Desktop/taiwan-mahjong1/apps/server/src/__tests__/provably-fair-server.test.ts)
+- [x] **P0-M**: 雀魂 (Mahjong Soul) 高質感黑金大廳與結算開牌驗證工具 — 包含三大模式卡片、段位戰、好友房、AI 修煉場與獨立 `/verify` 稽核工具頁。
 - [x] **P1**: 領域規則對齊規格 — 吃碰槓領域契約、標準 5 組+將、八對子（7對+1刻=17張）、骰子定門 (`TAIWAN_WALL_OPENING_V1`)、連續補花 (`IMMEDIATE_TAIL_CHAIN_V1`)。
 - [x] **P2**: 房間狀態機 — 過水獨立維護、優先序 胡 > 槓/碰 > 吃、逾時摸切/過牌、Client-Safe Snapshot 遮蔽、SQLite WAL 單實例持久化與重啟 RNG 重放。
   - 測試檔：[`apps/server/src/__tests__/persistence.test.ts`](file:///Users/ian/Desktop/taiwan-mahjong1/apps/server/src/__tests__/persistence.test.ts)
@@ -609,12 +603,12 @@ CMD ["node", "apps/server/dist/apps/server/src/serve-web.js"]
 ---
 
 ## Not done
-- **UI 額外 3D 特效與皮膚大工程**：依據硬性約束第 3 條與 P3 最小迴路要求，保持 Client-Safe 純表現層與 headless QA 測試 100% 通過，不引入額外不穩定資源。
+- **UI 額外 3D 特效與大型音畫包**：依據硬性約束第 3 條與 P3 最小迴路要求，保持 Client-Safe 純表現層與 headless QA 測試 100% 通過，確保輕量化 Web 載入速度。
 
 ---
 
 ## Tests after（N pass / 0 fail）
-- **TypeScript / Vitest**: **17 passed / 17 test files** (**264 passed / 0 failed**, 1.4s)
+- **TypeScript / Vitest**: **17 passed / 17 test files** (**266 passed / 0 failed**, 1.4s)
 - **Typecheck**: `pnpm typecheck` **0 errors**
 - **Build**: `pnpm build` **0 errors**
 - **Godot Headless QA**: **58 passed / 0 failed**
@@ -692,7 +686,7 @@ pnpm dev:web
 > 本文件彙整專案的核心架構、伺服器權威邏輯、規則領域模型、通訊協定與安全防護層。
 > 適合直接提供給 LLM (ChatGPT / Claude / Gemini) 進行架構分析、功能擴充或優化建議。
 
-- **打包時間**：2026-08-27T07:01:34.335Z
+- **打包時間**：2026-08-27T16:09:16.729Z
 - **核心檔案數**：14 個精華檔案
 
 ---
@@ -11708,6 +11702,25 @@ func show(game_state: Node) -> void:
 		_styled(al, GOLD_TEXT_DIM, 14)
 		fan_list.add_child(al)
 
+	# 可證明公平性 (Provably Fair) 開牌稽核按鈕
+	var pf: Dictionary = game_state.provably_fair
+	var proof_v: Variant = pf.get("proof", null)
+	if proof_v is Dictionary and not proof_v.is_empty():
+		var pf_btn := Button.new()
+		pf_btn.text = "⚖️ 驗證本局公平性 (Provably Fair Audit)"
+		pf_btn.custom_minimum_size = Vector2(0, 36)
+		pf_btn.pressed.connect(func():
+			var s_seed: String = str(proof_v.get("serverSeed", ""))
+			var s_hash: String = str(proof_v.get("serverSeedHash", ""))
+			var c_seed: String = str(proof_v.get("clientSeed", ""))
+			var nonce: int = int(proof_v.get("nonce", 1))
+			var url := "http://localhost:3000/verify?serverSeed=%s&serverSeedHash=%s&clientSeed=%s&nonce=%d" % [s_seed, s_hash, c_seed, nonce]
+			if OS.has_feature("web"):
+				url = "/verify?serverSeed=%s&serverSeedHash=%s&clientSeed=%s&nonce=%d" % [s_seed, s_hash, c_seed, nonce]
+			OS.shell_open(url)
+		)
+		fan_list.add_child(pf_btn)
+
 	detail.text = "\n".join(header)
 	var my_ready := false
 	for p in game_state.players:
@@ -22447,8 +22460,33 @@ networks:
 ```markdown
 # AI 自主迭代紀錄 (AI Iteration Log)
 
-- **執行日期**：2026-08-26
-- **工作範圍**：參考 Stake 實作 Provably Fair (可證明公平性) 種子序與承諾驗證機制、每局種子衍生、SHA-256 承諾廣播、結算開牌驗證、復現重放測試
+- **執行日期**：2026-08-27 ~ 2026-08-28
+- **工作範圍**：聽牌與打牌進張分析提示 (Tenpai Wait-Tile Overlay)、Provably Fair 獨立驗證頁面、雀魂 (Mahjong Soul) 高質感黑金大廳與結算開牌驗證、雲端 Dockerfile 修復與 GitHub 全自動同步
+
+---
+
+## 輪次 14：聽牌即時提示、雀魂大廳重構與雲端部署加固
+
+- **問題**：
+  1. 玩家手牌出牌缺乏即時牌效與聽牌張數提示，新手門檻高。
+  2. 原本大廳介面為純線框文字風格，缺乏現代商用日麻/台麻（如雀魂）之精品質感與模式選擇。
+  3. 結算面板缺乏一鍵 Provably Fair 開牌驗證入口。
+  4. Dockerfile 存在 Alpine native build 工具缺失與 pnpm approve-builds 阻斷。
+
+- **修改檔案**：
+  - `packages/rules/src/wait.ts` & `packages/rules/src/__tests__/wait.test.ts`（新增 `calculateDiscardWaits` 牌效與聽牌分析）
+  - `apps/server/src/snapshot.ts`（`ClientSnapshot` 加入 `discardHints`，即時計算全場棄牌/副露/手牌後剩餘張數）
+  - `apps/server/src/public/verify.html` & `apps/server/src/index.ts`（新增獨立 Provably Fair 驗證網頁與 `/verify` 路由）
+  - `apps/player-client/scenes/Main.tscn` & `scripts/main.gd`（雀魂黑金大廳重構：頂部玩家面板、快速開桌、好友房、AI 修煉場）
+  - `apps/player-client/scripts/table.gd` & `scripts/ui/SettlementView.gd`（出牌聽牌即時浮動提示、四家等候卡片、結算開牌驗證按鈕）
+  - `Dockerfile`, `pnpm-workspace.yaml`, `package.json`, `.dockerignore`（修復 Docker Debian 構建、授權 pnpm 建置原生模組）
+
+- **驗證結果**：
+  - `pnpm test`：**266/266 PASS**（17 個測試檔案全數通過）
+  - `pnpm typecheck`：**Done**（零型別錯誤）
+  - `pnpm build`：**Done**（編譯成功）
+  - Godot Headless QA Check (`qa_render_check.tscn`)：**PASS 58 / FAIL 0**
+  - GitHub 倉庫同步：**成功推送到 `hankkon/mahjon:main`**
 
 ---
 
@@ -23642,6 +23680,7 @@ exec nginx -g 'daemon off;'
   },
   "packageManager": "pnpm@11.21.0",
   "scripts": {
+    "start": "node apps/server/dist/apps/server/src/serve-web.js",
     "build": "pnpm -r run build",
     "dev": "pnpm --filter @taiwan-mahjong/server dev",
     "dev:web": "pnpm --filter @taiwan-mahjong/server dev:web",
@@ -29217,11 +29256,12 @@ packages:
   - "packages/*"
   - "apps/*"
 
-# Allow build scripts for packages required by vitest/esbuild.
-onlyBuiltDependencies:
-  - esbuild
 allowBuilds:
   esbuild: true
+
+onlyBuiltDependencies:
+  - esbuild
+  - better-sqlite3
 ```
 
 ## File: railway.json
